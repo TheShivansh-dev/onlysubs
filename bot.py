@@ -1,86 +1,102 @@
-from telegram.ext import  Application,filters, CommandHandler,MessageHandler
-from Handlers.command import TOKEN,help_command
-from Handlers.command import register_group,add_url,forceregister,broadcast_message
-from Handlers.translation import start_translation_command,mystreak_command,adddata_command,cancel_translation_command,difficulty_callback,next_sentence_command,translation_message_handler
-from Handlers.common import send_thought_of_the_day,bot_added_to_group_handler,download_report_command,scheduled_send_thought,update_report_command
-from Handlers.voice import handle_voice_message
-from Handlers.manageTokens import add_tokens_command,start_command,addpara_command,deletepara_command,deletepara_callback,addpara_level_callback
-from Handlers.readandrecord import next_read_and_record_command,mss_back_callback,mss_level_callback,my_speech_score_command,rar_next_prompt_callback,rar_level_callback,rar_score_command,rar_leaderboard_command
-from Commands.Features import features_command, features_callback
-from telegram.ext import ChatMemberHandler
-from Commands.DailyCurrentAffairs import sendtoday_command
-from Commands.wordgame import getword_command,stopword_command,wordgame_callback,wordgame_message_handler,mywordscore_command
-from Commands.QuizHandler import addquiz_command,updatequizzip_command, updatequizmaster_command,handle_quiz_text,handle_quiz_poll,stop_command, QUIZ_GROUP_ID
-from telegram.ext import CallbackQueryHandler 
-import asyncio,time
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ChatMemberHandler, filters
+from Handlers.config import TOKEN
+from Handlers.db import init_schema
+from Handlers.subscription import (
+    start_command,
+    help_command,
+    admin_stats_command,
+    handle_subscription_callback,
+    handle_payment_callback,
+    check_subscription_expiry,
+    get_user_id_command,
+    get_chat_info_command,
+    log_user_join,
+    add_paid_user_command,
+    list_paid_users_command,
+    remove_paid_user_command,
+    view_all_users_command,
+    edit_user_command,
+    user_info_command,
+    gen_guid_command,
+    handle_member_join_tracking,
+)
+from Handlers.admin import (
+    startadmin_command,
+    handle_admin_callback,
+    handle_admin_message,
+    handle_group_setup,
+    webadmin_list_command,
+    webadmin_add_command,
+    webadmin_remove_command,
+    webadmin_changepass_command,
+)
+from Handlers.backup import backup_data_files, setallfiles_command
 from pytz import timezone
-
-def schedule_send_thought_job(app, loop):
-    asyncio.run_coroutine_threadsafe(scheduled_send_thought(app), loop)
+import datetime
 
 def main():
+    init_schema()
     application = Application.builder().token(TOKEN).build()
 
-    # Inside main(), after existing handlers:
-    application.add_handler(MessageHandler(filters.VOICE, handle_voice_message))
+    # ── Group setup — must be first so setadmin/setsubgroup payloads are caught ──
+    application.add_handler(
+        CommandHandler('start', handle_group_setup, filters=filters.ChatType.GROUPS)
+    )
+
+    # ── Public commands ──
     application.add_handler(CommandHandler('start', start_command))
     application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(CommandHandler("starttranslation", start_translation_command))
-    application.add_handler(CommandHandler("record", next_read_and_record_command))
-    application.add_handler(CommandHandler("myscore", my_speech_score_command))
-    application.add_handler(CommandHandler("addtokens", add_tokens_command))
-    application.add_handler(CallbackQueryHandler(mss_level_callback, pattern="^mss_level_"))
-    application.add_handler(CallbackQueryHandler(mss_back_callback,  pattern="^mss_back_"))
-    application.add_handler(CommandHandler("rarscore",rar_score_command))
-    application.add_handler(CommandHandler("topspeaker",rar_leaderboard_command))
-    application.add_handler(CallbackQueryHandler(rar_level_callback, pattern="^rar_level_"))
-    application.add_handler(CommandHandler("addpara",    addpara_command))
-    application.add_handler(CommandHandler("deletepara", deletepara_command))
-    application.add_handler(CallbackQueryHandler(addpara_level_callback, pattern="^addpara_level_"))
-    application.add_handler(CallbackQueryHandler(deletepara_callback,    pattern="^deletepara_"))
-    application.add_handler(CommandHandler("next", next_sentence_command))
-    
-    # Text messages in quiz group (for selection / filename / language steps)
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Chat(QUIZ_GROUP_ID), handle_quiz_text))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, translation_message_handler))
-    application.add_handler(CommandHandler("brdmessagespoken", broadcast_message))
-    application.add_handler(CommandHandler("sendtoday", sendtoday_command))
-    application.add_handler(ChatMemberHandler(bot_added_to_group_handler, ChatMemberHandler.MY_CHAT_MEMBER))
-    application.add_handler(CommandHandler("addUrl", add_url))
-    application.add_handler(CommandHandler("stop", cancel_translation_command))
-    application.add_handler(CommandHandler("sendthoughtoftheday", send_thought_of_the_day))
-    application.add_handler(CommandHandler("forceregister", forceregister))
-    application.add_handler(CommandHandler("mystreak", mystreak_command))
-    application.add_handler(CommandHandler("adddata", adddata_command))
-    application.add_handler(CommandHandler("features", features_command))
-    application.add_handler(CallbackQueryHandler(features_callback, pattern="^feat_"))
-    application.add_handler(CommandHandler("downloadreport", download_report_command))
-    application.add_handler(CommandHandler("updatereport", update_report_command))
-    application.add_handler(CallbackQueryHandler(rar_next_prompt_callback, pattern="^rar_next_prompt$"))
-    application.add_handler(CallbackQueryHandler(difficulty_callback, pattern="^tg_diff_"))
+    application.add_handler(CommandHandler('getuserid', get_user_id_command))
+    application.add_handler(CommandHandler('getchatinfo', get_chat_info_command))
 
-    #==========word
-    application.add_handler(CommandHandler("getword", getword_command))
-    application.add_handler(CommandHandler("stopword", stopword_command))
-    application.add_handler(CommandHandler("mywordscore", mywordscore_command))
+    # ── Admin commands ──
+    application.add_handler(CommandHandler('startadmin', startadmin_command))
+    application.add_handler(CommandHandler('stats',    admin_stats_command))
+    application.add_handler(CommandHandler('adduser',  add_paid_user_command))
+    application.add_handler(CommandHandler('listpaidusers', list_paid_users_command))
+    application.add_handler(CommandHandler('removeuser',    remove_paid_user_command))
+    application.add_handler(CommandHandler('viewall',  view_all_users_command))
+    application.add_handler(CommandHandler('edituser', edit_user_command))
+    application.add_handler(CommandHandler('userinfo', user_info_command))
+    application.add_handler(CommandHandler('genguid',         gen_guid_command))
+    application.add_handler(CommandHandler('setallfiles',     setallfiles_command))
+    # ── SuperAdmin web-panel management ──
+    application.add_handler(CommandHandler('webadmins',       webadmin_list_command))
+    application.add_handler(CommandHandler('addwebadmin',     webadmin_add_command))
+    application.add_handler(CommandHandler('removewebadmin',  webadmin_remove_command))
+    application.add_handler(CommandHandler('changewebpass',   webadmin_changepass_command))
 
-    #========Quiz
-    application.add_handler(CommandHandler("updatequizzip",    updatequizzip_command))
-    application.add_handler(CommandHandler("updatequizmaster", updatequizmaster_command))
-    application.add_handler(CommandHandler("addquiz", addquiz_command))
-    application.add_handler(CommandHandler("collect",    stop_command))
+    # ── Callback routers ──
+    application.add_handler(CallbackQueryHandler(handle_admin_callback,        pattern="^adm_"))
+    application.add_handler(CallbackQueryHandler(handle_subscription_callback, pattern="^sub_"))
+    application.add_handler(CallbackQueryHandler(handle_payment_callback,      pattern="^pay_"))
 
-    # Poll messages in quiz group (forwarded or sent polls)
-    application.add_handler(MessageHandler(filters.POLL & filters.Chat(QUIZ_GROUP_ID),handle_quiz_poll))
-    application.add_handler(CallbackQueryHandler(wordgame_callback, pattern="^wg_"))
-    application.add_handler(CallbackQueryHandler(wordgame_callback, pattern="^wg_next$"))
-    scheduler = AsyncIOScheduler(timezone=timezone('Asia/Kolkata'))
-    loop = asyncio.get_event_loop()
-    scheduler.add_job(schedule_send_thought_job, 'cron', hour=7, minute=00, args=[application, loop])
-    scheduler.start()
-    application.run_polling(allowed_updates=["message", "callback_query", "my_chat_member"])
+    # ── Message handlers ──
+    # Admin conversation messages (must be before other message handlers)
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            handle_admin_message
+        )
+    )
+    application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, log_user_join))
+    application.add_handler(ChatMemberHandler(handle_member_join_tracking, ChatMemberHandler.CHAT_MEMBER))
+
+    # ── Daily 8 AM IST expiry check ──
+    ist = timezone('Asia/Kolkata')
+    application.job_queue.run_daily(
+        check_subscription_expiry,
+        time=datetime.time(hour=8, minute=0, tzinfo=ist)
+    )
+
+    # ── Data backup every 30 minutes ──
+    application.job_queue.run_repeating(
+        backup_data_files,
+        interval=1800,
+        first=60,
+    )
+    application.run_polling(allowed_updates=["message", "callback_query", "chat_member"])
 
 if __name__ == "__main__":
-    print("Bot is running...")
+    print("Starting OnlySubscriber...\n")
     main()

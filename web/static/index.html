@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OnlySubscriber Admin</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --sidebar-width: 220px;
+      --sidebar-bg: #1a1d23;
+      --sidebar-text: #c9cdd4;
+      --sidebar-active: #4f8ef7;
+      --topbar-h: 56px;
+      --card-radius: 10px;
+    }
+    body { background: #f0f2f5; font-family: 'Segoe UI', sans-serif; }
+
+    /* ── Login ── */
+    #login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1d23 0%, #2c3149 100%);
+    }
+    .login-card {
+      width: 380px;
+      background: #fff;
+      border-radius: 16px;
+      padding: 2.5rem;
+      box-shadow: 0 8px 32px rgba(0,0,0,.3);
+    }
+    .login-card .brand { font-size: 1.5rem; font-weight: 700; color: #1a1d23; }
+    .login-card .brand span { color: #4f8ef7; }
+
+    /* ── App shell ── */
+    #app-screen { display: none; }
+
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      width: var(--sidebar-width);
+      background: var(--sidebar-bg);
+      color: var(--sidebar-text);
+      display: flex;
+      flex-direction: column;
+      z-index: 100;
+    }
+    .sidebar .brand {
+      height: var(--topbar-h);
+      display: flex;
+      align-items: center;
+      padding: 0 1.25rem;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #fff;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      letter-spacing: .3px;
+    }
+    .sidebar .brand span { color: #4f8ef7; }
+    .sidebar nav { flex: 1; padding: .75rem 0; overflow-y: auto; }
+    .sidebar nav .nav-link {
+      color: var(--sidebar-text);
+      padding: .6rem 1.25rem;
+      border-radius: 0;
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      font-size: .9rem;
+      transition: background .15s, color .15s;
+    }
+    .sidebar nav .nav-link:hover { background: rgba(255,255,255,.06); color: #fff; }
+    .sidebar nav .nav-link.active { background: rgba(79,142,247,.18); color: #4f8ef7; font-weight: 600; }
+    .sidebar nav .nav-link i { font-size: 1rem; width: 20px; text-align: center; }
+    .sidebar .logout-wrap { padding: .75rem 1rem 1rem; border-top: 1px solid rgba(255,255,255,.08); }
+
+    .topbar {
+      position: fixed;
+      top: 0;
+      left: var(--sidebar-width);
+      right: 0;
+      height: var(--topbar-h);
+      background: #fff;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      align-items: center;
+      padding: 0 1.5rem;
+      z-index: 99;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    }
+    .topbar h5 { margin: 0; font-weight: 600; color: #1a1d23; font-size: 1rem; }
+
+    .main-content {
+      margin-left: var(--sidebar-width);
+      margin-top: var(--topbar-h);
+      padding: 1.75rem;
+      min-height: calc(100vh - var(--topbar-h));
+    }
+
+    /* ── Tab panes ── */
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
+
+    /* ── Stat cards ── */
+    .stat-card {
+      background: #fff;
+      border-radius: var(--card-radius);
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      border-left: 4px solid #4f8ef7;
+    }
+    .stat-card.green { border-color: #22c55e; }
+    .stat-card.orange { border-color: #f97316; }
+    .stat-card.purple { border-color: #a855f7; }
+    .stat-card.teal { border-color: #14b8a6; }
+    .stat-card .icon {
+      width: 48px; height: 48px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+      background: rgba(79,142,247,.12);
+      color: #4f8ef7;
+    }
+    .stat-card.green .icon { background: rgba(34,197,94,.12); color: #22c55e; }
+    .stat-card.orange .icon { background: rgba(249,115,22,.12); color: #f97316; }
+    .stat-card.purple .icon { background: rgba(168,85,247,.12); color: #a855f7; }
+    .stat-card.teal .icon { background: rgba(20,184,166,.12); color: #14b8a6; }
+    .stat-card .value { font-size: 1.75rem; font-weight: 700; color: #1a1d23; line-height: 1; }
+    .stat-card .label { font-size: .8rem; color: #6b7280; margin-top: .2rem; }
+
+    /* ── Section card ── */
+    .section-card {
+      background: #fff;
+      border-radius: var(--card-radius);
+      box-shadow: 0 2px 8px rgba(0,0,0,.06);
+      overflow: hidden;
+    }
+    .section-card .sc-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #f0f2f5;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .section-card .sc-header h6 { margin: 0; font-weight: 600; color: #1a1d23; }
+    .section-card .sc-body { padding: 1.25rem; }
+
+    /* ── Tables ── */
+    .table { font-size: .84rem; }
+    .table thead th { background: #f8f9fb; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+    .table td { vertical-align: middle; }
+    .badge-active { background: #dcfce7; color: #15803d; font-weight: 600; padding: .25rem .6rem; border-radius: 20px; font-size: .75rem; }
+    .badge-inactive { background: #fee2e2; color: #b91c1c; font-weight: 600; padding: .25rem .6rem; border-radius: 20px; font-size: .75rem; }
+    .badge-used { background: #fef3c7; color: #92400e; font-weight: 600; padding: .25rem .6rem; border-radius: 20px; font-size: .75rem; }
+
+    .search-box { max-width: 260px; }
+
+    /* ── Guid stats ── */
+    .guid-stat { text-align: center; }
+    .guid-stat .num { font-size: 2rem; font-weight: 700; }
+    .guid-stat .lbl { font-size: .8rem; color: #6b7280; }
+
+    /* ── Toast ── */
+    #toast-container {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+    }
+    .toast-msg {
+      background: #1a1d23;
+      color: #fff;
+      padding: .65rem 1.1rem;
+      border-radius: 8px;
+      font-size: .85rem;
+      box-shadow: 0 4px 12px rgba(0,0,0,.25);
+      animation: fadeIn .2s ease;
+    }
+    .toast-msg.success { border-left: 4px solid #22c55e; }
+    .toast-msg.error   { border-left: 4px solid #ef4444; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ LOGIN ══════════════════ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="brand mb-4"><i class="bi bi-shield-lock-fill me-2" style="color:#4f8ef7"></i>Only<span>Subscriber</span></div>
+    <div id="login-error" class="alert alert-danger py-2 small d-none"></div>
+    <form id="login-form">
+      <div class="mb-3">
+        <label class="form-label small fw-semibold">Username</label>
+        <input id="login-user" type="text" class="form-control" placeholder="admin" autocomplete="username" required />
+      </div>
+      <div class="mb-4">
+        <label class="form-label small fw-semibold">Password</label>
+        <input id="login-pass" type="password" class="form-control" placeholder="••••••••" autocomplete="current-password" required />
+      </div>
+      <button type="submit" class="btn btn-primary w-100 fw-semibold">Sign In</button>
+    </form>
+  </div>
+</div>
+
+<!-- ══════════════════ APP ══════════════════ -->
+<div id="app-screen">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand"><i class="bi bi-shield-lock-fill me-2"></i>Only<span>Sub</span></div>
+    <nav>
+      <a class="nav-link active" href="#" data-tab="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
+      <a class="nav-link" href="#" data-tab="users"><i class="bi bi-people-fill"></i> Users</a>
+      <a class="nav-link" href="#" data-tab="paid-users"><i class="bi bi-person-check-fill"></i> Paid Users</a>
+      <a class="nav-link" href="#" data-tab="courses"><i class="bi bi-book-fill"></i> Courses</a>
+      <a class="nav-link" href="#" data-tab="groups"><i class="bi bi-collection-fill"></i> Groups</a>
+      <a class="nav-link" href="#" data-tab="guids"><i class="bi bi-key-fill"></i> GUIDs</a>
+      <a class="nav-link" href="#" data-tab="pending-invites"><i class="bi bi-envelope-fill"></i> Pending Invites</a>
+      <a class="nav-link superadmin-only" href="#" data-tab="admins" style="display:none"><i class="bi bi-shield-fill-check"></i> Admins</a>
+    </nav>
+    <div class="logout-wrap">
+      <button class="btn btn-outline-secondary btn-sm w-100" id="logout-btn"><i class="bi bi-box-arrow-left me-1"></i>Logout</button>
+    </div>
+  </aside>
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <h5 id="topbar-title">Dashboard</h5>
+  </div>
+
+  <!-- Main content -->
+  <main class="main-content">
+
+    <!-- ── Dashboard ── -->
+    <div class="tab-pane active" id="tab-dashboard">
+      <div class="row g-3 mb-4" id="stat-cards">
+        <div class="col-sm-6 col-xl-3">
+          <div class="stat-card">
+            <div class="icon"><i class="bi bi-people-fill"></i></div>
+            <div><div class="value" id="st-active-users">–</div><div class="label">Active Subscribers</div></div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="stat-card green">
+            <div class="icon"><i class="bi bi-person-check-fill"></i></div>
+            <div><div class="value" id="st-paid-users">–</div><div class="label">Active Paid Users</div></div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="stat-card orange">
+            <div class="icon"><i class="bi bi-book-fill"></i></div>
+            <div><div class="value" id="st-courses">–</div><div class="label">Courses</div></div>
+          </div>
+        </div>
+        <div class="col-sm-6 col-xl-3">
+          <div class="stat-card purple">
+            <div class="icon"><i class="bi bi-key-fill"></i></div>
+            <div><div class="value" id="st-guids">–</div><div class="label">Available GUIDs</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="section-card">
+        <div class="sc-header"><h6><i class="bi bi-info-circle me-2"></i>System Overview</h6></div>
+        <div class="sc-body">
+          <p class="mb-1 small text-muted">Total subscribers (all time): <strong id="st-total-users">–</strong></p>
+          <p class="mb-0 small text-muted">Data is live from PostgreSQL. Refresh the page to update.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Users ── -->
+    <div class="tab-pane" id="tab-users">
+      <div class="section-card">
+        <div class="sc-header">
+          <h6><i class="bi bi-people-fill me-2"></i>Registered Users</h6>
+          <input type="text" class="form-control form-control-sm search-box" id="users-search" placeholder="Search ID or username…" />
+        </div>
+        <div class="sc-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0" id="users-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Telegram ID</th>
+                  <th>Username</th>
+                  <th>Plan</th>
+                  <th>Registered</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="users-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Paid Users ── -->
+    <div class="tab-pane" id="tab-paid-users">
+      <div class="row g-3">
+        <div class="col-lg-8">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-person-check-fill me-2"></i>Paid Users</h6></div>
+            <div class="sc-body p-0">
+              <div class="table-responsive">
+                <table class="table table-hover mb-0" id="paid-table">
+                  <thead>
+                    <tr>
+                      <th>User ID</th>
+                      <th>Username</th>
+                      <th>Course</th>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="paid-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-person-plus-fill me-2"></i>Add Paid User</h6></div>
+            <div class="sc-body">
+              <form id="add-paid-form">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Telegram User ID</label>
+                  <input type="number" class="form-control form-control-sm" id="pu-user-id" placeholder="123456789" required />
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Username</label>
+                  <input type="text" class="form-control form-control-sm" id="pu-username" placeholder="@username" />
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Course</label>
+                  <input type="text" class="form-control form-control-sm" id="pu-course" placeholder="stemTreky" required />
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Start Date</label>
+                  <input type="date" class="form-control form-control-sm" id="pu-start" required />
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">End Date</label>
+                  <input type="date" class="form-control form-control-sm" id="pu-end" required />
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add User</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Courses ── -->
+    <div class="tab-pane" id="tab-courses">
+      <div class="row g-3">
+        <div class="col-lg-8">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-book-fill me-2"></i>Courses</h6></div>
+            <div class="sc-body p-0">
+              <table class="table table-hover mb-0" id="courses-table">
+                <thead><tr><th>#</th><th>Course Name</th><th></th></tr></thead>
+                <tbody id="courses-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-4">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-plus-circle-fill me-2"></i>Add Course</h6></div>
+            <div class="sc-body">
+              <form id="add-course-form">
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Course Name</label>
+                  <input type="text" class="form-control form-control-sm" id="course-name-input" placeholder="e.g. Advanced Python" required />
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add Course</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Groups ── -->
+    <div class="tab-pane" id="tab-groups">
+      <div class="section-card">
+        <div class="sc-header"><h6><i class="bi bi-collection-fill me-2"></i>Groups (read-only)</h6></div>
+        <div class="sc-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr><th>#</th><th>Group ID</th><th>Group Name</th><th>Type</th><th>Course</th><th>Added</th><th>Active</th></tr>
+              </thead>
+              <tbody id="groups-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── GUIDs ── -->
+    <div class="tab-pane" id="tab-guids">
+      <div class="row g-3 mb-3">
+        <div class="col-4">
+          <div class="section-card text-center py-3">
+            <div class="guid-stat">
+              <div class="num text-success" id="guid-available">–</div>
+              <div class="lbl">Available</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="section-card text-center py-3">
+            <div class="guid-stat">
+              <div class="num text-danger" id="guid-used">–</div>
+              <div class="lbl">Used</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-4">
+          <div class="section-card text-center py-3">
+            <div class="guid-stat">
+              <div class="num text-primary" id="guid-total">–</div>
+              <div class="lbl">Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="section-card" style="max-width:400px">
+        <div class="sc-header"><h6><i class="bi bi-key-fill me-2"></i>Generate GUIDs</h6></div>
+        <div class="sc-body">
+          <form id="gen-guid-form" class="d-flex gap-2 align-items-end">
+            <div class="flex-grow-1">
+              <label class="form-label small fw-semibold">Count</label>
+              <input type="number" class="form-control form-control-sm" id="guid-count" value="100" min="1" max="10000" required />
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm fw-semibold">Generate</button>
+          </form>
+          <div id="guid-gen-result" class="mt-2 small text-muted"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Pending Invites ── -->
+    <div class="tab-pane" id="tab-pending-invites">
+      <div class="section-card">
+        <div class="sc-header"><h6><i class="bi bi-envelope-fill me-2"></i>Pending Invites</h6></div>
+        <div class="sc-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead>
+                <tr><th>#</th><th>Course</th><th>Months</th><th>Start</th><th>End</th><th>Created</th><th>Status</th></tr>
+              </thead>
+              <tbody id="invites-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Admins tab (superadmin only) ── -->
+    <div class="tab-pane" id="tab-admins">
+      <div class="section-card mb-3">
+        <div class="sc-header"><h6><i class="bi bi-person-plus-fill me-2"></i>Add Admin</h6></div>
+        <div class="sc-body">
+          <form id="add-admin-form" class="row g-2 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold">Username</label>
+              <input id="new-admin-user" class="form-control form-control-sm" placeholder="username" required />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-semibold">Password</label>
+              <input id="new-admin-pass" type="password" class="form-control form-control-sm" placeholder="min 6 chars" required />
+            </div>
+            <div class="col-md-2">
+              <label class="form-label small fw-semibold">Role</label>
+              <select id="new-admin-role" class="form-select form-select-sm">
+                <option value="admin">Admin</option>
+                <option value="superadmin">SuperAdmin</option>
+              </select>
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="section-card">
+        <div class="sc-header"><h6><i class="bi bi-people-fill me-2"></i>Admin Accounts</h6></div>
+        <div class="sc-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr><th>#</th><th>Username</th><th>Role</th><th>Created</th><th>Change Password</th><th>Remove</th></tr></thead>
+              <tbody id="admins-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ══════════════════════════════════════════════════════════════
+//  State & helpers
+// ══════════════════════════════════════════════════════════════
+const API = '';  // same origin
+
+function getToken() { return localStorage.getItem('admin_token'); }
+function setToken(t) { localStorage.setItem('admin_token', t); }
+function clearToken() { localStorage.removeItem('admin_token'); }
+function getRole()  { return localStorage.getItem('admin_role') || 'admin'; }
+function setRole(r) { localStorage.setItem('admin_role', r); }
+function clearRole(){ localStorage.removeItem('admin_role'); }
+
+function authHeaders() {
+  return { 'Authorization': 'Bearer ' + getToken(), 'Content-Type': 'application/json' };
+}
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: authHeaders(),
+    ...opts,
+  });
+  if (res.status === 401) { logout(); return null; }
+  return res;
+}
+
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast-msg ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+function escHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function statusBadge(active) {
+  return active
+    ? '<span class="badge-active">Active</span>'
+    : '<span class="badge-inactive">Inactive</span>';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Login
+// ══════════════════════════════════════════════════════════════
+document.getElementById('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl    = document.getElementById('login-error');
+  errEl.classList.add('d-none');
+
+  const body = new URLSearchParams({ username, password });
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      errEl.textContent = data.detail || 'Login failed';
+      errEl.classList.remove('d-none');
+      return;
+    }
+    const data = await res.json();
+    setToken(data.access_token);
+    setRole(data.role || 'admin');
+    showApp();
+  } catch (err) {
+    errEl.textContent = 'Network error';
+    errEl.classList.remove('d-none');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  App init
+// ══════════════════════════════════════════════════════════════
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-screen').style.display   = 'block';
+  // Show Admins tab only for superadmin
+  document.querySelectorAll('.superadmin-only').forEach(el => {
+    el.style.display = getRole() === 'superadmin' ? '' : 'none';
+  });
+  switchTab('dashboard');
+}
+
+function logout() {
+  clearToken();
+  clearRole();
+  document.getElementById('login-screen').style.display = '';
+  document.getElementById('app-screen').style.display   = 'none';
+}
+
+document.getElementById('logout-btn').addEventListener('click', logout);
+
+// ══════════════════════════════════════════════════════════════
+//  Tab routing
+// ══════════════════════════════════════════════════════════════
+const TAB_TITLES = {
+  'dashboard':      'Dashboard',
+  'users':          'Registered Users',
+  'paid-users':     'Paid Users',
+  'courses':        'Courses',
+  'groups':         'Groups',
+  'guids':          'GUIDs',
+  'pending-invites':'Pending Invites',
+  'admins':         'Admin Accounts',
+};
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar nav .nav-link').forEach(l => l.classList.remove('active'));
+
+  const pane = document.getElementById('tab-' + name);
+  if (pane) pane.classList.add('active');
+
+  const link = document.querySelector(`.sidebar nav .nav-link[data-tab="${name}"]`);
+  if (link) link.classList.add('active');
+
+  document.getElementById('topbar-title').textContent = TAB_TITLES[name] || name;
+
+  // Load data for the tab
+  if (name === 'dashboard')       loadStats();
+  if (name === 'users')           loadUsers();
+  if (name === 'paid-users')      loadPaidUsers();
+  if (name === 'courses')         loadCourses();
+  if (name === 'groups')          loadGroups();
+  if (name === 'guids')           loadGuidStats();
+  if (name === 'pending-invites') loadPendingInvites();
+  if (name === 'admins')          loadAdmins();
+}
+
+document.querySelectorAll('.sidebar nav .nav-link').forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    switchTab(link.dataset.tab);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Dashboard
+// ══════════════════════════════════════════════════════════════
+async function loadStats() {
+  const res = await apiFetch('/api/stats');
+  if (!res) return;
+  const d = await res.json();
+  document.getElementById('st-active-users').textContent  = d.active_users   ?? '–';
+  document.getElementById('st-paid-users').textContent    = d.active_paid_users ?? '–';
+  document.getElementById('st-courses').textContent       = d.total_courses   ?? '–';
+  document.getElementById('st-guids').textContent         = d.available_guids ?? '–';
+  document.getElementById('st-total-users').textContent   = d.total_users     ?? '–';
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Users
+// ══════════════════════════════════════════════════════════════
+let _allUsers = [];
+
+async function loadUsers() {
+  const res = await apiFetch('/api/users');
+  if (!res) return;
+  _allUsers = await res.json();
+  renderUsers(_allUsers);
+}
+
+function renderUsers(users) {
+  const tbody = document.getElementById('users-tbody');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No users found</td></tr>'; return; }
+  tbody.innerHTML = users.map((u, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td><code>${escHtml(u.userid)}</code></td>
+      <td>${escHtml(u.username || '–')}</td>
+      <td><span class="badge bg-light text-dark border">${escHtml(u.plan_type || '–')}</span></td>
+      <td>${escHtml(u.registration_date || '–')}</td>
+      <td>${escHtml(u.end_date || '–')}</td>
+      <td>${statusBadge(!u.isremoved)}</td>
+      <td>
+        ${!u.isremoved ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+document.getElementById('users-search').addEventListener('input', e => {
+  const q = e.target.value.toLowerCase();
+  const filtered = _allUsers.filter(u =>
+    String(u.userid).includes(q) ||
+    String(u.username || '').toLowerCase().includes(q)
+  );
+  renderUsers(filtered);
+});
+
+async function removeUser(userId) {
+  if (!confirm(`Remove user ${userId}?`)) return;
+  const res = await apiFetch(`/api/users/${userId}`, { method: 'DELETE' });
+  if (res && res.ok) { toast('User removed'); loadUsers(); }
+  else toast('Failed to remove user', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Paid Users
+// ══════════════════════════════════════════════════════════════
+async function loadPaidUsers() {
+  const res = await apiFetch('/api/paid-users');
+  if (!res) return;
+  const users = await res.json();
+  const tbody = document.getElementById('paid-tbody');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No paid users</td></tr>'; return; }
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td><code>${escHtml(u.user_id)}</code></td>
+      <td>${escHtml(u.username || '–')}</td>
+      <td><span class="badge bg-light text-dark border">${escHtml(u.course || '–')}</span></td>
+      <td>${escHtml(u.start_date || '–')}</td>
+      <td>${escHtml(u.end_date || '–')}</td>
+      <td>${statusBadge(u.is_active)}</td>
+      <td>
+        ${u.is_active ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removePaidUser(${u.user_id})">Remove</button>` : ''}
+      </td>
+    </tr>`).join('');
+}
+
+document.getElementById('add-paid-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    user_id:    parseInt(document.getElementById('pu-user-id').value),
+    username:   document.getElementById('pu-username').value.trim(),
+    course:     document.getElementById('pu-course').value.trim(),
+    start_date: document.getElementById('pu-start').value,
+    end_date:   document.getElementById('pu-end').value,
+  };
+  const res = await apiFetch('/api/paid-users', { method: 'POST', body: JSON.stringify(body) });
+  if (res && res.ok) {
+    toast('Paid user added');
+    e.target.reset();
+    loadPaidUsers();
+  } else {
+    const d = await res?.json().catch(() => ({}));
+    toast(d.detail || 'Failed to add user', 'error');
+  }
+});
+
+async function removePaidUser(userId) {
+  if (!confirm(`Remove paid user ${userId}?`)) return;
+  const res = await apiFetch(`/api/paid-users/${userId}`, { method: 'DELETE' });
+  if (res && res.ok) { toast('Paid user removed'); loadPaidUsers(); }
+  else toast('Failed', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Courses
+// ══════════════════════════════════════════════════════════════
+async function loadCourses() {
+  const res = await apiFetch('/api/courses');
+  if (!res) return;
+  const courses = await res.json();
+  const tbody = document.getElementById('courses-tbody');
+  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
+  tbody.innerHTML = courses.map((c, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td>${escHtml(c.course_name)}</td>
+      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Delete</button></td>
+    </tr>`).join('');
+}
+
+document.getElementById('add-course-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const name = document.getElementById('course-name-input').value.trim();
+  if (!name) return;
+  const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify({ course_name: name }) });
+  if (res && res.ok) { toast('Course added'); e.target.reset(); loadCourses(); }
+  else toast('Failed to add course', 'error');
+});
+
+async function deleteCourse(id) {
+  if (!confirm('Delete this course?')) return;
+  const res = await apiFetch(`/api/courses/${id}`, { method: 'DELETE' });
+  if (res && res.ok) { toast('Course deleted'); loadCourses(); }
+  else toast('Failed', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Groups
+// ══════════════════════════════════════════════════════════════
+async function loadGroups() {
+  const res = await apiFetch('/api/groups');
+  if (!res) return;
+  const groups = await res.json();
+  const tbody = document.getElementById('groups-tbody');
+  if (!groups.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No groups configured</td></tr>'; return; }
+  tbody.innerHTML = groups.map((g, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td><code>${escHtml(g.group_id)}</code></td>
+      <td>${escHtml(g.group_name || '–')}</td>
+      <td><span class="badge bg-secondary">${escHtml(g.type)}</span></td>
+      <td>${escHtml(g.course_name || '–')}</td>
+      <td>${escHtml(g.added_date || '–')}</td>
+      <td>${statusBadge(g.is_active)}</td>
+    </tr>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  GUIDs
+// ══════════════════════════════════════════════════════════════
+async function loadGuidStats() {
+  const res = await apiFetch('/api/guids');
+  if (!res) return;
+  const d = await res.json();
+  document.getElementById('guid-available').textContent = d.available ?? '–';
+  document.getElementById('guid-used').textContent      = d.used      ?? '–';
+  document.getElementById('guid-total').textContent     = d.total     ?? '–';
+}
+
+document.getElementById('gen-guid-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const count = parseInt(document.getElementById('guid-count').value) || 100;
+  const res   = await apiFetch('/api/guids/generate', { method: 'POST', body: JSON.stringify({ count }) });
+  const resultEl = document.getElementById('guid-gen-result');
+  if (res && res.ok) {
+    const d = await res.json();
+    resultEl.textContent = `Generated ${d.inserted} new GUIDs.`;
+    toast(`${d.inserted} GUIDs generated`);
+    loadGuidStats();
+  } else {
+    resultEl.textContent = 'Failed to generate GUIDs.';
+    toast('Failed', 'error');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Pending Invites
+// ══════════════════════════════════════════════════════════════
+async function loadPendingInvites() {
+  const res = await apiFetch('/api/pending-invites');
+  if (!res) return;
+  const invites = await res.json();
+  const tbody = document.getElementById('invites-tbody');
+  if (!invites.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No pending invites</td></tr>'; return; }
+  tbody.innerHTML = invites.map((inv, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td>${escHtml(inv.course_name || '–')}</td>
+      <td>${escHtml(inv.months)}</td>
+      <td>${escHtml(inv.start_date || '–')}</td>
+      <td>${escHtml(inv.end_date || '–')}</td>
+      <td>${escHtml(inv.created_date || '–')}</td>
+      <td>${inv.is_used
+        ? '<span class="badge-used">Used</span>'
+        : '<span class="badge-active">Pending</span>'
+      }</td>
+    </tr>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Admins  (superadmin only)
+// ══════════════════════════════════════════════════════════════
+async function loadAdmins() {
+  const res = await apiFetch('/api/admins');
+  if (!res) return;
+  const admins = await res.json();
+  const tbody = document.getElementById('admins-tbody');
+  if (!admins.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No admins</td></tr>'; return; }
+  tbody.innerHTML = admins.map((a, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td><strong>${escHtml(a.username)}</strong></td>
+      <td><span class="badge ${a.role === 'superadmin' ? 'bg-danger' : 'bg-primary'}">${escHtml(a.role)}</span></td>
+      <td class="text-muted small">${escHtml((a.created_at || '').slice(0, 10))}</td>
+      <td>
+        <div class="input-group input-group-sm" style="max-width:220px">
+          <input type="password" class="form-control form-control-sm" id="pw-${escHtml(a.username)}" placeholder="New password" />
+          <button class="btn btn-outline-secondary btn-sm" onclick="changeAdminPassword('${escHtml(a.username)}')">Set</button>
+        </div>
+      </td>
+      <td>
+        ${a.role !== 'superadmin'
+          ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button>`
+          : '<span class="text-muted small">–</span>'}
+      </td>
+    </tr>`).join('');
+}
+
+document.getElementById('add-admin-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = document.getElementById('new-admin-user').value.trim();
+  const password = document.getElementById('new-admin-pass').value;
+  const role     = document.getElementById('new-admin-role').value;
+  const res = await apiFetch('/api/admins', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, role }),
+  });
+  if (res && res.status === 201) {
+    toast('Admin added');
+    document.getElementById('new-admin-user').value = '';
+    document.getElementById('new-admin-pass').value = '';
+    loadAdmins();
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to add admin', 'error');
+  }
+});
+
+async function removeAdmin(username) {
+  if (!confirm(`Remove admin "${username}"?`)) return;
+  const res = await apiFetch(`/api/admins/${encodeURIComponent(username)}`, { method: 'DELETE' });
+  if (res && res.ok) { toast('Admin removed'); loadAdmins(); }
+  else toast('Failed to remove admin', 'error');
+}
+
+async function changeAdminPassword(username) {
+  const input = document.getElementById(`pw-${username}`);
+  const newPw = input ? input.value : '';
+  if (!newPw || newPw.length < 6) { toast('Password must be at least 6 characters', 'error'); return; }
+  const res = await apiFetch(`/api/admins/${encodeURIComponent(username)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ new_password: newPw }),
+  });
+  if (res && res.ok) { toast(`Password changed for ${username}`); if (input) input.value = ''; }
+  else toast('Failed to change password', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Bootstrap
+// ══════════════════════════════════════════════════════════════
+(function init() {
+  if (getToken()) {
+    showApp();
+  }
+})();
+</script>
+</body>
+</html>
