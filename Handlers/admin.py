@@ -25,8 +25,7 @@ from .db import (
 import os, html
 import pandas as pd
 from datetime import datetime
-from passlib.context import CryptContext as _CryptContext
-_pwd_ctx = _CryptContext(schemes=["bcrypt"], deprecated="auto")
+from .auth import hash_password as _hash_password
 
 # ── in-memory conversation state per user ──
 _state: dict[int, dict] = {}
@@ -658,7 +657,7 @@ async def webadmin_add_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Password must be at least 6 characters.")
         return
     try:
-        pw_hash = _pwd_ctx.hash(password)
+        pw_hash = _hash_password(password)
         db_create_admin_user(username, pw_hash, role=role)
         await update.message.reply_text(
             f"✅ Admin <b>{html.escape(username)}</b> (<code>{role}</code>) added.",
@@ -702,7 +701,7 @@ async def webadmin_changepass_command(update: Update, context: ContextTypes.DEFA
         await update.message.reply_text("Password must be at least 6 characters.")
         return
     try:
-        pw_hash = _pwd_ctx.hash(password)
+        pw_hash = _hash_password(password)
         db_change_admin_password(username, pw_hash)
         await update.message.reply_text(
             f"✅ Password changed for <b>{html.escape(username)}</b>.",

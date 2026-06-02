@@ -224,7 +224,8 @@
       <a class="nav-link" href="#" data-tab="groups"><i class="bi bi-collection-fill"></i> Groups</a>
       <a class="nav-link" href="#" data-tab="guids"><i class="bi bi-key-fill"></i> GUIDs</a>
       <a class="nav-link" href="#" data-tab="pending-invites"><i class="bi bi-envelope-fill"></i> Pending Invites</a>
-      <a class="nav-link superadmin-only" href="#" data-tab="admins" style="display:none"><i class="bi bi-shield-fill-check"></i> Admins</a>
+      <a class="nav-link superadmin-only" href="#" data-tab="admins"    style="display:none"><i class="bi bi-shield-fill-check"></i> Admins</a>
+      <a class="nav-link superadmin-only" href="#" data-tab="settings" style="display:none"><i class="bi bi-gear-fill"></i> Settings</a>
     </nav>
     <div class="logout-wrap">
       <button class="btn btn-outline-secondary btn-sm w-100" id="logout-btn"><i class="bi bi-box-arrow-left me-1"></i>Logout</button>
@@ -512,6 +513,22 @@
       </div>
     </div>
 
+    <!-- ── Settings tab (superadmin only) ── -->
+    <div class="tab-pane" id="tab-settings">
+      <div class="section-card">
+        <div class="sc-header">
+          <h6><i class="bi bi-gear-fill me-2"></i>Bot Settings</h6>
+          <span class="text-muted small">Changes take effect after bot restart</span>
+        </div>
+        <div class="sc-body p-0">
+          <table class="table table-hover mb-0" id="settings-table">
+            <thead><tr><th style="width:35%">Setting</th><th>Current Value</th><th style="width:15%">Save</th></tr></thead>
+            <tbody id="settings-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -632,6 +649,7 @@ const TAB_TITLES = {
   'guids':          'GUIDs',
   'pending-invites':'Pending Invites',
   'admins':         'Admin Accounts',
+  'settings':       'Bot Settings',
 };
 
 function switchTab(name) {
@@ -655,6 +673,7 @@ function switchTab(name) {
   if (name === 'guids')           loadGuidStats();
   if (name === 'pending-invites') loadPendingInvites();
   if (name === 'admins')          loadAdmins();
+  if (name === 'settings')        loadSettings();
 }
 
 document.querySelectorAll('.sidebar nav .nav-link').forEach(link => {
@@ -946,6 +965,42 @@ async function changeAdminPassword(username) {
   });
   if (res && res.ok) { toast(`Password changed for ${username}`); if (input) input.value = ''; }
   else toast('Failed to change password', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Settings  (superadmin only)
+// ══════════════════════════════════════════════════════════════
+async function loadSettings() {
+  const res = await apiFetch('/api/settings');
+  if (!res) return;
+  const settings = await res.json();
+  const tbody = document.getElementById('settings-tbody');
+  if (!settings.length) { tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No settings</td></tr>'; return; }
+  tbody.innerHTML = settings.map(s => `
+    <tr>
+      <td>
+        <div class="fw-semibold small">${escHtml(s.label)}</div>
+        <div class="text-muted" style="font-size:.75rem;font-family:monospace">${escHtml(s.key)}</div>
+      </td>
+      <td>
+        <input type="text" class="form-control form-control-sm" id="setting-${escHtml(s.key)}"
+               value="${escHtml(s.value)}" style="font-family:monospace" />
+      </td>
+      <td>
+        <button class="btn btn-primary btn-sm w-100" onclick="saveSetting('${escHtml(s.key)}')">Save</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function saveSetting(key) {
+  const input = document.getElementById(`setting-${key}`);
+  const value = input ? input.value.trim() : '';
+  const res = await apiFetch(`/api/settings/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
+  if (res && res.ok) toast(`${key} updated`);
+  else toast('Failed to save setting', 'error');
 }
 
 // ══════════════════════════════════════════════════════════════

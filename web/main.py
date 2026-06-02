@@ -14,12 +14,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 # ── DB imports ──────────────────────────────────────────────────────────────
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from Handlers.auth import hash_password, verify_password
 from Handlers.db import (
     init_schema,
     db_get_admin_user,
@@ -41,6 +41,8 @@ from Handlers.db import (
     db_generate_guids,
     db_get_all_groups,
     db_get_all_pending_invites,
+    db_get_all_settings,
+    db_set_setting,
 )
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -51,8 +53,7 @@ TOKEN_EXPIRE  = 8  # hours
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "TheMonk@gmail.com")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "@onlySubs")
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2  = OAuth2PasswordBearer(tokenUrl="/api/login")
+oauth2 = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -66,14 +67,13 @@ def startup():
     # Create default admin user if not present
     existing = db_get_admin_user(ADMIN_USERNAME)
     if not existing:
-        pw_hash = pwd_ctx.hash(ADMIN_PASSWORD)
-        db_create_admin_user(ADMIN_USERNAME, pw_hash, role="superadmin")
+        db_create_admin_user(ADMIN_USERNAME, hash_password(ADMIN_PASSWORD), role="superadmin")
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return pwd_ctx.verify(plain, hashed)
+    return verify_password(plain, hashed)
 
 
 def _create_token(username: str, role: str) -> str:
@@ -297,8 +297,7 @@ def add_admin(body: AddAdminBody, sa: dict = Depends(_require_superadmin)):
         raise HTTPException(400, "username and password required")
     if body.role not in ("admin", "superadmin"):
         raise HTTPException(400, "role must be 'admin' or 'superadmin'")
-    pw_hash = pwd_ctx.hash(body.password)
-    db_create_admin_user(username, pw_hash, role=body.role)
+    db_create_admin_user(username, hash_password(body.password), role=body.role)
     return {"ok": True}
 
 
@@ -324,6 +323,22 @@ def change_password(username: str, body: ChangePasswordBody,
         raise HTTPException(404, "Admin not found")
     if not body.new_password or len(body.new_password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
-    new_hash = pwd_ctx.hash(body.new_password)
-    db_change_admin_password(username, new_hash)
+    db_change_admin_password(username, hash_password(body.new_password))
+    return {"ok": True}
+
+
+# ── Bot Settings  (SuperAdmin only) ───────────────────────────────────────────
+
+@app.get("/api/settings")
+def get_settings(sa: dict = Depends(_require_superadmin)):
+    return db_get_all_settings()
+
+
+class SettingBody(BaseModel):
+    value: str
+
+
+@app.put("/api/settings/{key}")
+def update_setting(key: str, body: SettingBody, sa: dict = Depends(_require_superadmin)):
+    db_set_setting(key, body.value.strip())
     return {"ok": True}

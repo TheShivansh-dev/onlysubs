@@ -81,3 +81,20 @@ CREATE TABLE IF NOT EXISTS invite_links (
     created_date DATE,
     is_revoked   SMALLINT DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS bot_settings (
+    key        VARCHAR(100) PRIMARY KEY,
+    value      TEXT,
+    label      VARCHAR(200),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Default bot settings (only inserted if missing)
+INSERT INTO bot_settings (key, value, label) VALUES
+    ('ADMIN_GROUP_ID',       '-12342343214',       'Admin Group ID'),
+    ('ADMIN_USER_ID',        '8502504224',          'SuperAdmin Telegram User ID'),
+    ('BOT_CREATOR_GROUP_ID', '-1002345678901',      'Backup Group ID'),
+    ('BOT_CREATOR_USER_ID',  '1234567890',          'Bot Creator User ID'),
+    ('BOT_USERNAME',         '@tesingt_04bot',      'Bot Username'),
+    ('SUPPORT_CONTACT',      '@helpsteno',          'Support Contact')
+ON CONFLICT (key) DO NOTHING;

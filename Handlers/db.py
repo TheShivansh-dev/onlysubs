@@ -581,3 +581,33 @@ def db_change_admin_password(username: str, new_hash: str):
                 "UPDATE admin_panel_users SET password_hash=%s WHERE username=%s",
                 (new_hash, username),
             )
+
+
+# ─────────────────────────────────────────────
+#  Bot Settings
+# ─────────────────────────────────────────────
+
+def db_get_all_settings() -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value, label FROM bot_settings ORDER BY key")
+            rows = cur.fetchall()
+    return [{"key": r[0], "value": str(r[1] or ""), "label": str(r[2] or r[0])} for r in rows]
+
+
+def db_get_setting(key: str, default: str = "") -> str:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM bot_settings WHERE key=%s", (key,))
+            row = cur.fetchone()
+    return str(row[0]) if row else default
+
+
+def db_set_setting(key: str, value: str):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO bot_settings (key, value) VALUES (%s, %s) "
+                "ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=NOW()",
+                (key, value, value),
+            )
