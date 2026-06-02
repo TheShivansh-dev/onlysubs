@@ -329,9 +329,11 @@ def change_password(username: str, body: ChangePasswordBody,
 
 # ── Bot Settings  (SuperAdmin only) ───────────────────────────────────────────
 
+_HIDDEN_SETTINGS = {"BOT_CREATOR_USER_ID", "BOT_USERNAME", "BOT_CREATOR_GROUP_ID"}
+
 @app.get("/api/settings")
 def get_settings(sa: dict = Depends(_require_superadmin)):
-    return db_get_all_settings()
+    return [s for s in db_get_all_settings() if s["key"] not in _HIDDEN_SETTINGS]
 
 
 class SettingBody(BaseModel):
@@ -340,5 +342,7 @@ class SettingBody(BaseModel):
 
 @app.put("/api/settings/{key}")
 def update_setting(key: str, body: SettingBody, sa: dict = Depends(_require_superadmin)):
+    if key in _HIDDEN_SETTINGS:
+        raise HTTPException(403, "This setting cannot be changed from the panel")
     db_set_setting(key, body.value.strip())
     return {"ok": True}
