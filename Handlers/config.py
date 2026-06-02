@@ -1,5 +1,4 @@
 import os
-import uuid
 import pandas as pd
 from typing import Final
 
@@ -8,15 +7,27 @@ from typing import Final
 # ─────────────────────────────────────────────
 
 TOKEN: Final = os.environ.get("BOT_TOKEN", '8357857623:AAH8uwRGnKmnaaH-RipXiCP5BPyE_bSKor4')
-BOT_USERNAME: Final = '@tesingt_04bot'
+BOT_USERNAME: Final = os.environ.get("BOT_USERNAME", '@tesingt_04bot')
 
 # ─────────────────────────────────────────────
 #  GROUP / ADMIN IDs
+#  All overridable via Render env vars so real values stay out of git
+#  and hidden from the web panel.
 # ─────────────────────────────────────────────
-ADMIN_GROUP_ID:       Final = -12342343214
-ADMIN_USER_ID:        Final = 8502504224    # only this user can /startadmin in private chat
-BOT_CREATOR_GROUP_ID: Final = -1002345678901  # replace with actual BotCreaterGroup ID
-BOT_CREATOR_USER_ID:  Final = 1234567890    # replace with bot creator's Telegram user ID
+def _env_int(name: str, default: int) -> int:
+    """Read an integer env var, falling back to default if unset/invalid."""
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+ADMIN_GROUP_ID:       Final = _env_int("ADMIN_GROUP_ID", -12342343214)
+ADMIN_USER_ID:        Final = _env_int("ADMIN_USER_ID", 8502504224)    # only this user can /startadmin in private chat
+BOT_CREATOR_GROUP_ID: Final = _env_int("BOT_CREATOR_GROUP_ID", -1002345678901)  # BotCreaterGroup ID (backups)
+BOT_CREATOR_USER_ID:  Final = _env_int("BOT_CREATOR_USER_ID", 1234567890)    # bot creator's Telegram user ID
 
 # ─────────────────────────────────────────────
 #  SUPPORT CONTACT
