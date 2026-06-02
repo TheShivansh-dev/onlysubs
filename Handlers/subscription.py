@@ -260,75 +260,132 @@ async def handle_payment_callback(update: Update, context: ContextTypes.DEFAULT_
         log(f"[PAYMENT] Error notifying creator on approve: {e}")
 
 
+def _parse_end_date(end_date_val) -> date | None:
+    """Coerce a DB end_date (str or date) into a date, or None if unparseable."""
+    if isinstance(end_date_val, date):
+        return end_date_val
+    if isinstance(end_date_val, str):
+        try:
+            return datetime.strptime(end_date_val, '%Y-%m-%d').date()
+        except ValueError:
+            return None
+    return None
+
+
+def _course_to_group(course_or_plan: str) -> int | None:
+    """Resolve a course/plan identifier to its Telegram group id."""
+    cname = get_course_info(str(course_or_plan)).get('course_name', '') or str(course_or_plan)
+    return get_group_for_course(cname) or CHANNEL_MAPPING.get(str(course_or_plan))
+
+
+async def _kick_from_group(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:
+    """
+    Remove a user from a group but let them rejoin later: ban then immediately
+    unban. A bare ban would block any future subscription.
+    """
+    if not chat_id:
+        log(f"[KICK] No group mapped for user {user_id}; skipping removal")
+        return False
+    try:
+        await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
+        await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
+        log(f"[KICK] Removed user {user_id} from group {chat_id}")
+        return True
+    except Exception as e:
+        log(f"[KICK] Could not remove user {user_id} from {chat_id}: {e}")
+        return False
+
+
+async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
+    """Best-effort DM; manually-added users may never have started the bot."""
+    try:
+        await context.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
+    except Exception as e:
+        log(f"[NOTIFY] Could not message user {user_id}: {e}")
+
+
 async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
     today = datetime.now().date()
     if today.day == 1:
         await _send_payment_reminder(context)
 
+    # ── 1) Auto-registered users (GUID / invite-link flow) ──
     try:
         active_users = db_get_active_registered_users()
     except Exception as e:
-        log(f"[EXPIRY] Could not load users: {e}")
-        return
+        log(f"[EXPIRY] Could not load registered users: {e}")
+        active_users = []
 
     for row in active_users:
         user_id = row['userid']
         try:
-            end_date_val = row['end_date']
-            if isinstance(end_date_val, str):
-                end_date = datetime.strptime(end_date_val, '%Y-%m-%d').date()
-            else:
-                end_date = end_date_val  # already a date object from psycopg2
-
+            end_date = _parse_end_date(row['end_date'])
+            if end_date is None:
+                continue
             days_remaining = (end_date - today).days
 
             if days_remaining == 5:
-                await context.bot.send_message(
-                    chat_id=user_id, parse_mode="HTML",
-                    text=(
-                        "<b>Subscription Expiring Soon!</b>\n\n"
-                        "Your subscription expires in <b>5 days</b>.\n"
-                        "Renew now to keep access.\n\n"
-                        "Click /start to renew."
-                    )
+                await _notify_user(context, user_id,
+                    "<b>Subscription Expiring Soon!</b>\n\n"
+                    "Your subscription expires in <b>5 days</b>.\n"
+                    "Renew now to keep access.\n\nClick /start to renew."
                 )
-
             elif days_remaining == 3:
-                await context.bot.send_message(
-                    chat_id=user_id, parse_mode="HTML",
-                    text=(
-                        "<b>Final Reminder!</b>\n\n"
-                        "Your subscription expires in <b>3 days</b>.\n"
-                        "This is your last chance to renew.\n\n"
-                        "Click /start to renew now."
-                    )
+                await _notify_user(context, user_id,
+                    "<b>Final Reminder!</b>\n\n"
+                    "Your subscription expires in <b>3 days</b>.\n"
+                    "This is your last chance to renew.\n\nClick /start to renew now."
                 )
-
             elif days_remaining <= 0:
-                await context.bot.send_message(
-                    chat_id=user_id, parse_mode="HTML",
-                    text=(
-                        "<b>Subscription Expired</b>\n\n"
-                        "You have been removed from the group.\n"
-                        "To regain access, purchase a new plan.\n\n"
-                        "Click /start to purchase."
-                    )
+                await _notify_user(context, user_id,
+                    "<b>Subscription Expired</b>\n\n"
+                    "You have been removed from the group.\n"
+                    "To regain access, purchase a new plan.\n\nClick /start to purchase."
                 )
-
-                _plan_type = row.get('plan_type', 'plan4')
-                _cname     = get_course_info(str(_plan_type)).get('course_name', '')
-                channel_id = get_group_for_course(_cname) or CHANNEL_MAPPING.get(str(_plan_type), -1234567890)
-                try:
-                    await context.bot.ban_chat_member(
-                        chat_id=channel_id, user_id=user_id
-                    )
-                except Exception as e:
-                    log(f"Could not ban user {user_id}: {e}")
-
+                await _kick_from_group(context, _course_to_group(row.get('plan_type', '')), user_id)
                 db_remove_registered_user(user_id, str(today))
 
         except Exception as e:
-            log(f"Error processing user {user_id}: {e}")
+            log(f"[EXPIRY] Error processing registered user {user_id}: {e}")
+
+    # ── 2) Manually-added paid users (/adduser & web panel) ──
+    try:
+        paid_users = db_get_all_paid_users()
+    except Exception as e:
+        log(f"[EXPIRY] Could not load paid users: {e}")
+        paid_users = []
+
+    for row in paid_users:
+        if int(row.get('is_active', 0)) != 1:
+            continue
+        user_id = row['user_id']
+        try:
+            end_date = _parse_end_date(row['end_date'])
+            if end_date is None:
+                continue
+            days_remaining = (end_date - today).days
+
+            if days_remaining == 5:
+                await _notify_user(context, user_id,
+                    "<b>Subscription Expiring Soon!</b>\n\n"
+                    "Your access expires in <b>5 days</b>. Contact the admin to renew."
+                )
+            elif days_remaining == 3:
+                await _notify_user(context, user_id,
+                    "<b>Final Reminder!</b>\n\n"
+                    "Your access expires in <b>3 days</b>. Contact the admin to renew."
+                )
+            elif days_remaining <= 0:
+                await _notify_user(context, user_id,
+                    "<b>Subscription Expired</b>\n\n"
+                    "You have been removed from the group.\n"
+                    "Contact the admin to renew your access."
+                )
+                await _kick_from_group(context, _course_to_group(row.get('course', '')), user_id)
+                db_remove_paid_user(user_id)
+
+        except Exception as e:
+            log(f"[EXPIRY] Error processing paid user {user_id}: {e}")
 
 
 # ─────────────────────────────────────────────
