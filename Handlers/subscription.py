@@ -1,54 +1,28 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from telegram.error import BadRequest
 from .config import (
+    get_support_contact,
     get_admin_group_id,
-    ADMIN_USER_ID,
-    BOT_CREATOR_USER_ID,
-    get_pending_invite,
-    mark_pending_invite_used,
-    SUPPORT_CONTACT,
-    REGISTERED_USERS_FILE,
-    INVITE_LINKS_FILE,
-    PAID_USERS_FILE,
-    USER_JOIN_LOGS_FILE,
-    SUBSCRIPTION_PLANS,
-    CHANNEL_MAPPING,
-    get_months,
-    get_course_info,
+    get_course_by_code,
+    get_course_by_name,
+    get_claimed_link,
+    claim_link,
     get_display_message,
-    get_plan_display_label,
-    init_course_names_file,
-    get_group_for_course,
-    # GUID
     parse_start_param,
-    verify_guid,
-    mark_guid_used,
-    generate_guids,
-    build_start_link,
-    GUID_OK,
-    GUID_USED,
-    GUID_NOT_FOUND,
 )
 from .db import (
-    db_save_invite_link,
     db_save_registered_user,
+    db_save_invite_link,
     db_get_active_registered_users,
-    db_remove_registered_user,
     db_get_user_by_userid,
-    db_add_paid_user,
-    db_remove_paid_user,
-    db_edit_paid_user,
-    db_get_paid_user,
     db_get_all_paid_users,
-    db_get_all_registered_users,
-    db_generate_guids,
-    db_get_guid_samples,
+    db_get_paid_user,
+    db_remove_registered_user,
+    db_remove_paid_user,
 )
-import os
 import html
-from datetime import datetime, timedelta, date
 import uuid
+from datetime import datetime, timedelta, date
 
 
 def log(msg):
@@ -60,208 +34,186 @@ def log(msg):
 
 
 # ─────────────────────────────────────────────
-#  INVITE LINK
+#  /start  — external-website deep link
+#  Format: <UniqueId>_<CourseCode>_<Months>
 # ─────────────────────────────────────────────
 
-async def create_invite_link(context: ContextTypes.DEFAULT_TYPE,
-                             user_id: int, channel_id: int) -> str | None:
-    try:
-        link_id = str(uuid.uuid4())[:8]
-        log(f"\n[LINK_CREATE] user={user_id}  channel={channel_id}")
+async def _make_one_time_invite(context: ContextTypes.DEFAULT_TYPE,
+                                course: dict, user_id: int) -> str | None:
+    """
+    Create a fresh single-use (member_limit=1) invite link for this user.
+    Needs the group's numeric chat id (course['group_id']) and the bot to be
+    an admin there. Falls back to a static group_link if no group_id is set.
+    """
+    group_id = course.get('group_id')
+    if group_id:
+        try:
+            link_id = str(uuid.uuid4())[:8]
+            invite  = await context.bot.create_chat_invite_link(
+                chat_id=int(group_id),
+                member_limit=1,
+                name=f"u{user_id}_{link_id}",
+            )
+            try:
+                db_save_invite_link(link_id, user_id, invite.invite_link)
+            except Exception as e:
+                log(f"[LINK] could not record invite link: {e}")
+            return invite.invite_link
+        except Exception as e:
+            log(f"[LINK] create_chat_invite_link failed for group {group_id}, user {user_id}: {e}")
+            return None
+    # No numeric group id configured — fall back to a static link if present.
+    return course.get('group_link') or None
 
-        invite_link = await context.bot.create_chat_invite_link(
-            chat_id=channel_id,
-            member_limit=1,
-            name=f"user_{user_id}_{link_id}"
+
+async def _send_access(context: ContextTypes.DEFAULT_TYPE, update: Update,
+                       course: dict, months: int, end_date):
+    """Send a one-time group invite link + support contact to the user."""
+    invite = await _make_one_time_invite(context, course, update.effective_user.id)
+    msg    = get_display_message(course['course_name'], months, end_date)
+    if invite:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Join Group", url=invite)]])
+        await update.message.reply_text(msg, reply_markup=kb, parse_mode="HTML")
+    else:
+        await update.message.reply_text(
+            msg + f"\n\n⚠️ Couldn't create your invite link — contact {get_support_contact()}",
+            parse_mode="HTML"
         )
-        log(f"[LINK_CREATE] created: {invite_link.invite_link}")
-
-        db_save_invite_link(link_id, user_id, invite_link.invite_link)
-
-        return invite_link.invite_link
-
-    except BadRequest as e:
-        log(f"[LINK_CREATE] BadRequest: {e}  channel={channel_id}  user={user_id}")
-        return None
-    except Exception as e:
-        log(f"[LINK_CREATE] Error: {e}  channel={channel_id}  user={user_id}")
-        return None
 
 
-# ─────────────────────────────────────────────
-#  KEYBOARD
-# ─────────────────────────────────────────────
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id  = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
 
-def get_subscription_keyboard() -> InlineKeyboardMarkup:
-    init_course_names_file()
-    keyboard = [
-        [InlineKeyboardButton(get_plan_display_label(key), callback_data=f"sub_{key}")]
-        for key in SUBSCRIPTION_PLANS
-    ]
-    return InlineKeyboardMarkup(keyboard)
+    # No deep-link payload → simple greeting.
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Welcome!</b>\n\n"
+            "Use the access link you received to activate your subscription.\n\n"
+            f"Need help? Contact {get_support_contact()}",
+            parse_mode="HTML"
+        )
+        return
 
+    parsed = parse_start_param(context.args[0])
+    if parsed is None:
+        await update.message.reply_text(
+            f"<b>Invalid link.</b>\n\nThis access link is malformed.\n"
+            f"Contact {get_support_contact()} for help.",
+            parse_mode="HTML"
+        )
+        return
 
-# ─────────────────────────────────────────────
-#  REGISTER USER
-# ─────────────────────────────────────────────
+    unique_id, course_code, months = parsed
 
-async def register_user_subscription(user_id, username, plan_key,
-                                     context: ContextTypes.DEFAULT_TYPE):
-    plan       = SUBSCRIPTION_PLANS[plan_key]
-    months     = get_months(plan['month_code'])
-    today      = datetime.now().date()
-    end_date   = today + timedelta(days=30 * months)
+    course = get_course_by_code(course_code)
+    if not course:
+        await update.message.reply_text(
+            f"<b>Course not found.</b>\n\nThis link points to a course that no longer exists.\n"
+            f"Contact {get_support_contact()} for help.",
+            parse_mode="HTML"
+        )
+        return
 
-    course_name = get_course_info(plan_key)['course_name']
-    channel_id  = get_group_for_course(course_name) or CHANNEL_MAPPING.get(plan_key, -1234567890)
-    invite_link = await create_invite_link(context, user_id, channel_id)
-    link_id     = str(uuid.uuid4())[:8]
+    # ── Approach A: trust-on-first-use, bound to one Telegram user ──
+    claimed = get_claimed_link(unique_id)
 
-    if not invite_link:
-        raise Exception("Failed to create invite link")
+    if claimed and claimed.get('claimed_userid') is not None:
+        if claimed['claimed_userid'] == user_id:
+            # Same user, same link → re-issue the group entry link.
+            row = db_get_user_by_userid(user_id)
+            end_date = row['end_date'] if row else _today_plus(months)
+            await _send_access(context, update, course, months, end_date)
+        else:
+            # A different account is trying to reuse this link → block.
+            await update.message.reply_text(
+                "<b>Link expired.</b>\n\n"
+                "This access link has already been used by another account.\n\n"
+                f"Contact {get_support_contact()}",
+                parse_mode="HTML"
+            )
+        return
+
+    # ── First use → register the subscription ──
+    today    = datetime.now().date()
+    end_date = today + timedelta(days=30 * months)
 
     db_save_registered_user(
         userid=user_id,
         username=username,
-        invite_link_id=link_id,
-        invite_link_url=invite_link,
+        invite_link_id=str(uuid.uuid4())[:8],
+        invite_link_url='',
         registration_date=str(today),
         end_date=str(end_date),
-        plan_type=plan_key,
-        link_used=0,
+        plan_type=course['course_name'],
+        link_used=1,
+    )
+    claim_link(unique_id, user_id)
+
+    log(f"[REGISTER] user={user_id} (@{username}) -> {course['course_name']} "
+        f"({months}m) expires={end_date}")
+    await _send_access(context, update, course, months, end_date)
+
+
+def _today_plus(months: int):
+    return datetime.now().date() + timedelta(days=30 * months)
+
+
+# ─────────────────────────────────────────────
+#  PUBLIC COMMANDS
+# ─────────────────────────────────────────────
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "<b>Help</b>\n\n"
+        "/start - Activate the access link you were given\n"
+        "/getuserid - Get your Telegram User ID\n\n"
+        f"Need help? Contact {get_support_contact()}",
+        parse_mode="HTML"
     )
 
-    course_info  = get_course_info(plan_key)
-    plan_display = get_plan_display_label(plan_key)
-    return invite_link, end_date, plan_display, course_info
+
+async def get_user_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id  = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name
+    await update.message.reply_text(
+        f"<b>Your User Information</b>\n\n"
+        f"User ID: <code>{user_id}</code>\n"
+        f"Username: @{html.escape(str(username))}",
+        parse_mode="HTML"
+    )
+
+
+async def get_chat_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat = update.effective_chat
+    title = chat.title or "Direct Message"
+    log(f"\nChat: {title}  ID: {chat.id}  Type: {chat.type}\n")
+    await update.message.reply_text(
+        f"<b>Chat Information</b>\n\n"
+        f"Name: {html.escape(title)}\n"
+        f"ID: <code>{chat.id}</code>\n"
+        f"Type: {chat.type}",
+        parse_mode="HTML"
+    )
+
+
+async def log_user_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log new chat members to console."""
+    for member in update.message.new_chat_members:
+        if member.is_bot:
+            continue
+        username = member.username or member.first_name
+        log(f"[JOIN] {username} (ID: {member.id}) joined chat {update.effective_chat.id}")
 
 
 # ─────────────────────────────────────────────
-#  CALLBACKS
+#  EXPIRY  — daily job
+#  Instead of auto-kicking, post expiring users to the admin group
+#  with Save / Remove buttons. The actual removal happens in admin.py
+#  when an admin taps a button.
 # ─────────────────────────────────────────────
-
-async def handle_subscription_callback(update: Update,
-                                       context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    plan_key = query.data.replace('sub_', '')
-    user_id  = query.from_user.id
-    username = query.from_user.username or query.from_user.first_name
-
-    if plan_key not in SUBSCRIPTION_PLANS:
-        await query.edit_message_text("Invalid plan selected.")
-        return
-
-    try:
-        invite_link, end_date, plan_display, _ = \
-            await register_user_subscription(user_id, username, plan_key, context)
-
-        await query.edit_message_text(
-            f"<b>Subscription Confirmed!</b>\n\n"
-            f"Plan: {plan_display}\n"
-            f"Registered: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"Expires: {end_date}\n\n"
-            f"Your exclusive access is ready!",
-            parse_mode="HTML"
-        )
-
-        msg  = get_display_message(plan_key, end_date)
-        kbrd = [[InlineKeyboardButton("Join Here", url=invite_link)]]
-        await context.bot.send_message(
-            chat_id=user_id, text=msg,
-            reply_markup=InlineKeyboardMarkup(kbrd), parse_mode="HTML"
-        )
-
-    except Exception as e:
-        log(f"Error registering subscription: {e}")
-        await query.edit_message_text(
-            f"Error: {html.escape(str(e))}", parse_mode="HTML"
-        )
-
-
-# ─────────────────────────────────────────────
-#  DAILY EXPIRY CHECK  (called by job_queue at 8 AM)
-# ─────────────────────────────────────────────
-
-async def _send_payment_reminder(context: ContextTypes.DEFAULT_TYPE):
-    """Send monthly payment reminder on the 1st of each month."""
-    logo_path = "Assets/Logo.jpg"
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Approve Payment", callback_data="pay_approve")]])
-
-    try:
-        if os.path.exists(logo_path):
-            with open(logo_path, 'rb') as f:
-                await context.bot.send_photo(
-                    chat_id=ADMIN_USER_ID,
-                    photo=f,
-                    caption=(
-                        "<b>Monthly Service Payment</b>\n\n"
-                        "Today is the 1st. Please complete the monthly payment "
-                        "to keep the bot running."
-                    ),
-                    reply_markup=kb,
-                    parse_mode="HTML"
-                )
-        else:
-            await context.bot.send_message(
-                chat_id=ADMIN_USER_ID,
-                text=(
-                    "<b>Monthly Service Payment</b>\n\n"
-                    "Today is the 1st. Please complete the monthly payment "
-                    "to keep the bot running."
-                ),
-                reply_markup=kb,
-                parse_mode="HTML"
-            )
-    except Exception as e:
-        log(f"[PAYMENT] Error sending to admin: {e}")
-
-    try:
-        await context.bot.send_message(
-            chat_id=BOT_CREATOR_USER_ID,
-            text=(
-                "<b>Payment Reminder</b>\n\n"
-                "Today is the 1st — monthly payment is expected today.\n"
-                "You will be notified once the admin approves it."
-            ),
-            parse_mode="HTML"
-        )
-    except Exception as e:
-        log(f"[PAYMENT] Error sending reminder to creator: {e}")
-
-
-async def handle_payment_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer("Payment marked as approved.")
-
-    try:
-        approver = query.from_user.username or query.from_user.first_name
-        await context.bot.send_message(
-            chat_id=BOT_CREATOR_USER_ID,
-            text=(
-                "<b>Payment Done</b>\n\n"
-                f"Admin (<b>{html.escape(approver)}</b>) has approved the payment.\n"
-                "Please verify and confirm receipt."
-            ),
-            parse_mode="HTML"
-        )
-        try:
-            await query.edit_message_caption(
-                "<b>Payment Approved</b>\n\nThe creator has been notified to verify.",
-                parse_mode="HTML"
-            )
-        except Exception:
-            await query.edit_message_text(
-                "<b>Payment Approved</b>\n\nThe creator has been notified to verify.",
-                parse_mode="HTML"
-            )
-    except Exception as e:
-        log(f"[PAYMENT] Error notifying creator on approve: {e}")
-
 
 def _parse_end_date(end_date_val) -> date | None:
-    """Coerce a DB end_date (str or date) into a date, or None if unparseable."""
     if isinstance(end_date_val, date):
         return end_date_val
     if isinstance(end_date_val, str):
@@ -272,44 +224,99 @@ def _parse_end_date(end_date_val) -> date | None:
     return None
 
 
-def _course_to_group(course_or_plan: str) -> int | None:
-    """Resolve a course/plan identifier to its Telegram group id."""
-    cname = get_course_info(str(course_or_plan)).get('course_name', '') or str(course_or_plan)
-    return get_group_for_course(cname) or CHANNEL_MAPPING.get(str(course_or_plan))
-
-
-async def _kick_from_group(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:
-    """
-    Remove a user from a group but let them rejoin later: ban then immediately
-    unban. A bare ban would block any future subscription.
-    """
-    if not chat_id:
-        log(f"[KICK] No group mapped for user {user_id}; skipping removal")
-        return False
-    try:
-        await context.bot.ban_chat_member(chat_id=chat_id, user_id=user_id)
-        await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
-        log(f"[KICK] Removed user {user_id} from group {chat_id}")
-        return True
-    except Exception as e:
-        log(f"[KICK] Could not remove user {user_id} from {chat_id}: {e}")
-        return False
-
-
 async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: str):
-    """Best-effort DM; manually-added users may never have started the bot."""
     try:
         await context.bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
     except Exception as e:
         log(f"[NOTIFY] Could not message user {user_id}: {e}")
 
 
-async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
-    today = datetime.now().date()
-    if today.day == 1:
-        await _send_payment_reminder(context)
+def _renew_message(course_name: str, days: int) -> str:
+    """Reminder sent to the user 5 and 3 days before removal."""
+    return (
+        f"<b>Subscription Expiring Soon!</b>\n\n"
+        f"Your <b>{html.escape(str(course_name))}</b> access expires in <b>{days} days</b>.\n\n"
+        f"Please renew the same course to keep your access.\n"
+        f"To renew, contact {get_support_contact()}"
+    )
 
-    # ── 1) Auto-registered users (GUID / invite-link flow) ──
+
+async def _post_expiry_card(context, admin_group, kind: str, user_id: int,
+                            name: str, course_name: str, end_date):
+    """Send one admin-group card (1 day before removal) with Save / Remove buttons."""
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Save",        callback_data=f"exp_save_{kind}_{user_id}"),
+        InlineKeyboardButton("❌ Remove now",  callback_data=f"exp_rem_{kind}_{user_id}"),
+    ]])
+    try:
+        await context.bot.send_message(
+            chat_id=admin_group,
+            text=(
+                "⚠️ <b>Expiring Tomorrow</b>\n\n"
+                f"User: <b>{html.escape(str(name))}</b>\n"
+                f"ID: <code>{user_id}</code>\n"
+                f"Course: {html.escape(str(course_name))}\n"
+                f"Expires: {end_date}\n\n"
+                "This user will be <b>removed automatically</b> when it expires.\n"
+                "Tap <b>Save</b> to keep them (extends 30 days), or "
+                "<b>Remove now</b> to take them out immediately."
+            ),
+            reply_markup=kb,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log(f"[EXPIRY] Could not post card for {user_id}: {e}")
+
+
+# ─────────────────────────────────────────────
+#  REMOVAL  (shared by the daily job and the admin Remove button)
+# ─────────────────────────────────────────────
+
+def resolve_group_id(kind: str, user_id: int):
+    """Find the numeric group id a user belongs to, via their course."""
+    if kind == "r":
+        row = db_get_user_by_userid(user_id)
+        cname = row.get('plan_type') if row else None
+    else:
+        row = db_get_paid_user(user_id)
+        cname = row.get('course') if row else None
+    if not cname:
+        return None
+    course = get_course_by_name(str(cname))
+    return course.get('group_id') if course else None
+
+
+async def kick_user(context: ContextTypes.DEFAULT_TYPE, group_id, user_id: int) -> bool:
+    """Ban then immediately unban so the user can rejoin on a future subscription."""
+    if not group_id:
+        log(f"[KICK] No group_id for user {user_id}; skipping removal")
+        return False
+    try:
+        await context.bot.ban_chat_member(chat_id=int(group_id), user_id=user_id)
+        await context.bot.unban_chat_member(chat_id=int(group_id), user_id=user_id, only_if_banned=True)
+        log(f"[KICK] Removed user {user_id} from group {group_id}")
+        return True
+    except Exception as e:
+        log(f"[KICK] Could not remove user {user_id} from {group_id}: {e}")
+        return False
+
+
+async def kick_and_deactivate(context: ContextTypes.DEFAULT_TYPE, kind: str, user_id: int) -> bool:
+    """Remove a user from their group and mark them inactive in the DB."""
+    group_id = resolve_group_id(kind, user_id)
+    kicked   = await kick_user(context, group_id, user_id)
+    if kind == "r":
+        db_remove_registered_user(user_id, str(datetime.now().date()))
+    else:
+        db_remove_paid_user(user_id)
+    return kicked
+
+
+async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
+    today       = datetime.now().date()
+    admin_group = get_admin_group_id()
+
+    # ── 1) Auto-registered users (deep-link flow) ──
     try:
         active_users = db_get_active_registered_users()
     except Exception as e:
@@ -317,38 +324,29 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
         active_users = []
 
     for row in active_users:
-        user_id = row['userid']
+        user_id  = row['userid']
+        end_date = _parse_end_date(row['end_date'])
+        if end_date is None:
+            continue
+        days = (end_date - today).days
         try:
-            end_date = _parse_end_date(row['end_date'])
-            if end_date is None:
-                continue
-            days_remaining = (end_date - today).days
-
-            if days_remaining == 5:
-                await _notify_user(context, user_id,
-                    "<b>Subscription Expiring Soon!</b>\n\n"
-                    "Your subscription expires in <b>5 days</b>.\n"
-                    "Renew now to keep access.\n\nClick /start to renew."
-                )
-            elif days_remaining == 3:
-                await _notify_user(context, user_id,
-                    "<b>Final Reminder!</b>\n\n"
-                    "Your subscription expires in <b>3 days</b>.\n"
-                    "This is your last chance to renew.\n\nClick /start to renew now."
-                )
-            elif days_remaining <= 0:
+            if days == 5:
+                await _notify_user(context, user_id, _renew_message(row.get('plan_type', ''), 5))
+            elif days == 3:
+                await _notify_user(context, user_id, _renew_message(row.get('plan_type', ''), 3))
+            elif days == 1 and admin_group:
+                await _post_expiry_card(context, admin_group, "r", user_id,
+                                        row.get('username', ''), row.get('plan_type', ''), end_date)
+            elif days <= 0:
+                await kick_and_deactivate(context, "r", user_id)
                 await _notify_user(context, user_id,
                     "<b>Subscription Expired</b>\n\n"
                     "You have been removed from the group.\n"
-                    "To regain access, purchase a new plan.\n\nClick /start to purchase."
-                )
-                await _kick_from_group(context, _course_to_group(row.get('plan_type', '')), user_id)
-                db_remove_registered_user(user_id, str(today))
-
+                    f"To rejoin, renew your subscription — contact {get_support_contact()}")
         except Exception as e:
-            log(f"[EXPIRY] Error processing registered user {user_id}: {e}")
+            log(f"[EXPIRY] Error on registered user {user_id}: {e}")
 
-    # ── 2) Manually-added paid users (/adduser & web panel) ──
+    # ── 2) Manually-added paid users (web panel) ──
     try:
         paid_users = db_get_all_paid_users()
     except Exception as e:
@@ -358,534 +356,24 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
     for row in paid_users:
         if int(row.get('is_active', 0)) != 1:
             continue
-        user_id = row['user_id']
+        user_id  = row['user_id']
+        end_date = _parse_end_date(row['end_date'])
+        if end_date is None:
+            continue
+        days = (end_date - today).days
         try:
-            end_date = _parse_end_date(row['end_date'])
-            if end_date is None:
-                continue
-            days_remaining = (end_date - today).days
-
-            if days_remaining == 5:
-                await _notify_user(context, user_id,
-                    "<b>Subscription Expiring Soon!</b>\n\n"
-                    "Your access expires in <b>5 days</b>. Contact the admin to renew."
-                )
-            elif days_remaining == 3:
-                await _notify_user(context, user_id,
-                    "<b>Final Reminder!</b>\n\n"
-                    "Your access expires in <b>3 days</b>. Contact the admin to renew."
-                )
-            elif days_remaining <= 0:
+            if days == 5:
+                await _notify_user(context, user_id, _renew_message(row.get('course', ''), 5))
+            elif days == 3:
+                await _notify_user(context, user_id, _renew_message(row.get('course', ''), 3))
+            elif days == 1 and admin_group:
+                await _post_expiry_card(context, admin_group, "p", user_id,
+                                        row.get('username', ''), row.get('course', ''), end_date)
+            elif days <= 0:
+                await kick_and_deactivate(context, "p", user_id)
                 await _notify_user(context, user_id,
                     "<b>Subscription Expired</b>\n\n"
                     "You have been removed from the group.\n"
-                    "Contact the admin to renew your access."
-                )
-                await _kick_from_group(context, _course_to_group(row.get('course', '')), user_id)
-                db_remove_paid_user(user_id)
-
+                    f"To rejoin, renew your subscription — contact {get_support_contact()}")
         except Exception as e:
-            log(f"[EXPIRY] Error processing paid user {user_id}: {e}")
-
-
-# ─────────────────────────────────────────────
-#  COMMANDS
-# ─────────────────────────────────────────────
-
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id  = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-
-    # ── GUID-based deep link: ?start={guid}_{planKey}_{monthCode} ──
-    if context.args:
-        parsed = parse_start_param(context.args[0])
-
-        if parsed is None:
-            await update.message.reply_text(
-                "Invalid or expired link.\n\n"
-                f"If you think this is a mistake, contact {SUPPORT_CONTACT}",
-                parse_mode="HTML"
-            )
-            return
-
-        guid, plan_key, _ = parsed
-        status = verify_guid(guid)
-
-        if status == GUID_NOT_FOUND:
-            await update.message.reply_text(
-                "<b>Invalid Link</b>\n\n"
-                "This access link does not exist or has been tampered with.\n\n"
-                f"Contact {SUPPORT_CONTACT} for help.",
-                parse_mode="HTML"
-            )
-            return
-
-        if status == GUID_USED:
-            # Check if THIS user is already in registered_users with active subscription
-            user_row = db_get_user_by_userid(user_id)
-
-            if user_row and int(user_row.get('isremoved', 1)) == 0:
-                today = datetime.now().date()
-                try:
-                    end_date_val = user_row['end_date']
-                    if isinstance(end_date_val, str):
-                        exp = datetime.strptime(end_date_val, '%Y-%m-%d').date()
-                    else:
-                        exp = end_date_val
-                except Exception:
-                    exp = today  # fallback: treat as active
-
-                if exp >= today:
-                    # Same user, active subscription — send a fresh invite link
-                    _cname2 = get_course_info(str(user_row['plan_type'])).get('course_name', '')
-                    ch_id   = get_group_for_course(_cname2) or CHANNEL_MAPPING.get(str(user_row['plan_type']), -1234567890)
-                    invite_link = await create_invite_link(context, user_id, ch_id)
-                    if invite_link:
-                        kbrd = [[InlineKeyboardButton("Join Here", url=invite_link)]]
-                        await update.message.reply_text(
-                            "<b>Already Registered</b>\n\n"
-                            "You are already subscribed. Here is a fresh invite link:",
-                            reply_markup=InlineKeyboardMarkup(kbrd),
-                            parse_mode="HTML"
-                        )
-                    else:
-                        await update.message.reply_text(
-                            f"Could not create invite link. Contact {SUPPORT_CONTACT}",
-                            parse_mode="HTML"
-                        )
-                else:
-                    await update.message.reply_text(
-                        f"<b>Subscription Expired</b>\n\n"
-                        f"Your subscription expired on {user_row['end_date']}.\n"
-                        f"Contact {SUPPORT_CONTACT} to renew.",
-                        parse_mode="HTML"
-                    )
-            else:
-                # Different user trying to reuse this GUID — block
-                await update.message.reply_text(
-                    "<b>Access Not Allowed</b>\n\n"
-                    "This link has already been used by another account.\n\n"
-                    f"If you think this is a mistake, contact {SUPPORT_CONTACT}",
-                    parse_mode="HTML"
-                )
-            return
-
-        # status == GUID_OK — register the user
-        try:
-            invite_link, end_date, plan_display, _ = \
-                await register_user_subscription(user_id, username, plan_key, context)
-
-            mark_guid_used(guid)
-
-            await update.message.reply_text(
-                f"<b>Subscription Activated!</b>\n\n"
-                f"Plan: {plan_display}\n"
-                f"Expires: {end_date}\n\n"
-                f"Your exclusive access is ready!",
-                parse_mode="HTML"
-            )
-
-            msg  = get_display_message(plan_key, end_date)
-            kbrd = [[InlineKeyboardButton("Join Here", url=invite_link)]]
-            await context.bot.send_message(
-                chat_id=user_id, text=msg,
-                reply_markup=InlineKeyboardMarkup(kbrd), parse_mode="HTML"
-            )
-
-        except Exception as e:
-            log(f"Error registering from link: {e}")
-            await update.message.reply_text(
-                f"Error: {html.escape(str(e))}\n\nPlease try again or contact {SUPPORT_CONTACT}",
-                parse_mode="HTML"
-            )
-        return
-
-    # ── No args: show plan selection keyboard ──
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=(
-            "<b>Welcome to OnlySubscriber!</b>\n\n"
-            "Access exclusive courses and learning materials.\n\n"
-            "Choose a subscription plan to get started:"
-        ),
-        reply_markup=get_subscription_keyboard(),
-        parse_mode="HTML"
-    )
-
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, parse_mode="HTML",
-        text=(
-            "<b>OnlySubscriber Help</b>\n\n"
-            "/start - View subscription plans\n"
-            "/getuserid - Get your User ID\n"
-            "/help - Show this message\n\n"
-            "How it works:\n"
-            "1. Click /start to see plans\n"
-            "2. Select your subscription\n"
-            "3. Get instant group access\n"
-            "4. Receive expiry reminders\n\n"
-            "Need help? Contact: @support"
-        )
-    )
-
-
-async def admin_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        all_users = db_get_all_registered_users()
-    except Exception:
-        await update.message.reply_text("No data available.")
-        return
-
-    if not all_users:
-        await update.message.reply_text("No registered users yet.")
-        return
-
-    today   = datetime.now().date()
-    active  = [u for u in all_users if int(u.get('isremoved', 0)) == 0]
-    removed = [u for u in all_users if int(u.get('isremoved', 0)) == 1]
-
-    expiring = 0
-    for u in active:
-        try:
-            end_val = u['end_date']
-            if isinstance(end_val, str):
-                ed = datetime.strptime(end_val, '%Y-%m-%d').date()
-            else:
-                ed = end_val
-            days = (ed - today).days
-            if 0 <= days <= 5:
-                expiring += 1
-        except Exception:
-            pass
-
-    plan_counts: dict = {}
-    for u in active:
-        pt = str(u.get('plan_type', 'unknown'))
-        plan_counts[pt] = plan_counts.get(pt, 0) + 1
-
-    text = (
-        f"<b>Subscription Statistics</b>\n\n"
-        f"Total: {len(all_users)}\n"
-        f"Active: {len(active)}\n"
-        f"Removed: {len(removed)}\n"
-        f"Expiring (5 days): {expiring}\n\n"
-        f"<b>By Plan:</b>\n"
-    )
-    for plan, count in plan_counts.items():
-        text += f"  {plan}: {count}\n"
-
-    await update.message.reply_text(text, parse_mode="HTML")
-
-
-async def get_user_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id  = update.effective_user.id
-    username = update.effective_user.username or update.effective_user.first_name
-    await context.bot.send_message(
-        chat_id=update.effective_chat.id, parse_mode="HTML",
-        text=(
-            f"<b>Your User Information</b>\n\n"
-            f"User ID: <code>{user_id}</code>\n"
-            f"Username: @{username}"
-        )
-    )
-
-
-async def get_chat_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id    = update.effective_chat.id
-    chat_title = update.effective_chat.title or "Direct Message"
-    chat_type  = update.effective_chat.type
-    log(f"\nChat: {chat_title}  ID: {chat_id}  Type: {chat_type}\n")
-    await context.bot.send_message(
-        chat_id=chat_id, parse_mode="HTML",
-        text=(
-            f"<b>Chat Information</b>\n\n"
-            f"Name: {html.escape(chat_title)}\n"
-            f"ID: <code>{chat_id}</code>\n"
-            f"Type: {chat_type}"
-        )
-    )
-
-
-async def log_user_join(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Log new chat members to console (file write removed)."""
-    for member in update.message.new_chat_members:
-        if member.is_bot:
-            continue
-        user_id  = member.id
-        username = member.username or member.first_name
-        chat_id  = update.effective_chat.id
-        log(f"[JOIN] {username} (ID: {user_id}) joined chat {chat_id}")
-
-
-# ─────────────────────────────────────────────
-#  ADMIN COMMANDS  (admin group only)
-# ─────────────────────────────────────────────
-
-def _admin_only(update: Update) -> bool:
-    return update.effective_chat.id == get_admin_group_id()
-
-
-async def add_paid_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-    if not context.args or len(context.args) < 4:
-        await update.message.reply_text(
-            "<b>Add Paid User</b>\n\n"
-            "Usage: /adduser USER_ID COURSE START_DATE END_DATE\n"
-            "Example: /adduser 123456789 stemTreky 2026-05-16 2026-08-16\n\n"
-            "Courses: " + ", ".join(SUBSCRIPTION_PLANS.keys()),
-            parse_mode="HTML"
-        )
-        return
-    try:
-        user_id    = int(context.args[0])
-        course     = context.args[1]
-        start_date = context.args[2]
-        end_date   = context.args[3]
-
-        if course not in SUBSCRIPTION_PLANS:
-            await update.message.reply_text(f"Invalid course: {course}")
-            return
-        datetime.strptime(start_date, '%Y-%m-%d')
-        datetime.strptime(end_date,   '%Y-%m-%d')
-
-        db_add_paid_user(user_id, f"user_{user_id}", course, start_date, end_date)
-
-        await update.message.reply_text(
-            f"<b>Paid User Added!</b>\n\n"
-            f"User ID: {user_id}\n"
-            f"Course: {get_plan_display_label(course)}\n"
-            f"Start: {start_date}\n"
-            f"End: {end_date}",
-            parse_mode="HTML"
-        )
-    except ValueError as e:
-        await update.message.reply_text(f"Invalid input: {html.escape(str(e))}")
-
-
-async def list_paid_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-    users = db_get_all_paid_users()
-    active = [u for u in users if int(u.get('is_active', 0)) == 1]
-    if not active:
-        await update.message.reply_text("No paid users.")
-        return
-    text = "<b>Paid Users</b>\n\n<code>"
-    for i, u in enumerate(active, 1):
-        text += (
-            f"#{i} | ID: {u['user_id']}\n"
-            f"  Course: {u['course']}\n"
-            f"  {u['start_date']} -> {u['end_date']}\n\n"
-        )
-    text += "</code>"
-    await update.message.reply_text(text, parse_mode="HTML")
-
-
-async def remove_paid_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /removeuser USER_ID")
-        return
-    try:
-        user_id = int(context.args[0])
-        existing = db_get_paid_user(user_id)
-        if not existing:
-            await update.message.reply_text(f"User {user_id} not found.")
-            return
-        db_remove_paid_user(user_id)
-        await update.message.reply_text(f"User {user_id} removed.")
-    except ValueError:
-        await update.message.reply_text("Invalid User ID.")
-
-
-async def view_all_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-
-    paid_users = db_get_all_paid_users()
-    reg_users  = db_get_all_registered_users()
-
-    text = "<b>ALL USERS</b>\n\n"
-    active_paid = [u for u in paid_users if int(u.get('is_active', 0)) == 1]
-    if active_paid:
-        text += "<b>-- PAID (Manual) --</b>\n<code>"
-        for u in active_paid:
-            text += f"ID:{u['user_id']} | {u['course']} | {u['start_date']} -> {u['end_date']}\n"
-        text += "</code>\n"
-
-    active_reg = [u for u in reg_users if int(u.get('isremoved', 0)) == 0]
-    if active_reg:
-        text += "<b>-- REGISTERED (Auto) --</b>\n<code>"
-        for u in active_reg:
-            text += f"ID:{u['userid']} | {u['username']} | {u['plan_type']} | -> {u['end_date']}\n"
-        text += "</code>\n"
-
-    text += f"\nTotal Paid: {len(active_paid)} | Registered: {len(active_reg)} | Sum: {len(active_paid) + len(active_reg)}"
-    await update.message.reply_text(text, parse_mode="HTML")
-
-
-async def edit_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-    if not context.args or len(context.args) < 4:
-        await update.message.reply_text(
-            "<b>Edit User</b>\n\nUsage: /edituser USER_ID COURSE NEW_START NEW_END",
-            parse_mode="HTML"
-        )
-        return
-    try:
-        user_id   = int(context.args[0])
-        course    = context.args[1]
-        new_start = context.args[2]
-        new_end   = context.args[3]
-        if course not in SUBSCRIPTION_PLANS:
-            await update.message.reply_text(f"Invalid course: {course}")
-            return
-        datetime.strptime(new_start, '%Y-%m-%d')
-        datetime.strptime(new_end,   '%Y-%m-%d')
-        existing = db_get_paid_user(user_id)
-        if not existing:
-            await update.message.reply_text(f"User {user_id} not found.")
-            return
-        db_edit_paid_user(user_id, course, new_start, new_end)
-        await update.message.reply_text(
-            f"<b>User Updated</b>\n\nID: {user_id}\nCourse: {get_plan_display_label(course)}\n"
-            f"Start: {new_start}\nEnd: {new_end}",
-            parse_mode="HTML"
-        )
-    except ValueError as e:
-        await update.message.reply_text(f"Invalid input: {html.escape(str(e))}")
-
-
-async def gen_guid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    /genguid PLAN_KEY MONTH_CODE [COUNT]
-    Example: /genguid stemTreky xm4tw 100
-    """
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-
-    if not context.args or len(context.args) < 2:
-        plans_list = "\n".join(
-            f"  {k}  ({v['month_code']})" for k, v in SUBSCRIPTION_PLANS.items()
-        )
-        await update.message.reply_text(
-            "<b>Generate GUIDs</b>\n\n"
-            "Usage: /genguid PLAN_KEY MONTH_CODE [COUNT]\n\n"
-            "Example:\n"
-            "<code>/genguid stemTreky xm4tw 100</code>\n\n"
-            "<b>Available plans (plan_key  month_code):</b>\n"
-            f"<code>{plans_list}</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    plan_key   = context.args[0]
-    month_code = context.args[1]
-    count      = int(context.args[2]) if len(context.args) >= 3 else 100
-
-    if plan_key not in SUBSCRIPTION_PLANS:
-        await update.message.reply_text(f"Unknown plan: {plan_key}")
-        return
-
-    try:
-        added   = generate_guids(plan_key, month_code, count)
-        samples = db_get_guid_samples(3)
-
-        sample_links = "\n".join(
-            build_start_link(g, plan_key, month_code) for g in samples
-        )
-
-        await update.message.reply_text(
-            f"<b>GUIDs Generated</b>\n\n"
-            f"Plan: {get_plan_display_label(plan_key)}\n"
-            f"Month Code: <code>{month_code}</code>\n"
-            f"Count: {added}\n\n"
-            f"<b>Sample links:</b>\n<code>{sample_links}</code>\n\n"
-            f"GUIDs saved to database.",
-            parse_mode="HTML"
-        )
-
-    except Exception as e:
-        await update.message.reply_text(f"Error: {html.escape(str(e))}")
-
-
-async def user_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not _admin_only(update):
-        await update.message.reply_text("Admin group only.")
-        return
-    if not context.args:
-        await update.message.reply_text("Usage: /userinfo USER_ID")
-        return
-    try:
-        user_id  = int(context.args[0])
-        paid_row = db_get_paid_user(user_id)
-        reg_row  = db_get_user_by_userid(user_id)
-
-        text = f"<b>User ID: {user_id}</b>\n\n"
-        if paid_row:
-            text += (
-                f"<b>PAID USER</b>\n"
-                f"Course: {paid_row['course']}\n"
-                f"Start: {paid_row['start_date']}  End: {paid_row['end_date']}\n"
-                f"Status: {'Active' if int(paid_row['is_active']) == 1 else 'Inactive'}\n\n"
-            )
-        if reg_row:
-            text += (
-                f"<b>REGISTERED USER</b>\n"
-                f"Username: {reg_row['username']}\n"
-                f"Plan: {reg_row['plan_type']}\n"
-                f"Registered: {reg_row.get('registration_date', 'N/A')}  Expires: {reg_row['end_date']}\n"
-                f"Status: {'Active' if int(reg_row['isremoved']) == 0 else 'Removed'}\n"
-            )
-        if not paid_row and not reg_row:
-            text = f"User {user_id} not found."
-        await update.message.reply_text(text, parse_mode="HTML")
-    except ValueError:
-        await update.message.reply_text("Invalid User ID.")
-
-
-# ─────────────────────────────────────────────
-#  MEMBER JOIN TRACKING
-# ─────────────────────────────────────────────
-
-async def handle_member_join_tracking(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    member = update.chat_member
-    if not member or not member.invite_link:
-        return
-    if member.new_chat_member.status not in ('member', 'creator', 'administrator'):
-        return
-
-    invite_url = member.invite_link.invite_link
-    pending    = get_pending_invite(invite_url)
-    if not pending:
-        return
-
-    user     = member.new_chat_member.user
-    user_id  = user.id
-    username = user.username or user.first_name
-
-    link_id = str(uuid.uuid4())[:8]
-    db_save_registered_user(
-        userid=user_id,
-        username=username,
-        invite_link_id=link_id,
-        invite_link_url=invite_url,
-        registration_date=pending['start_date'],
-        end_date=pending['end_date'],
-        plan_type=pending['course_name'],
-        link_used=1,
-    )
-
-    mark_pending_invite_used(invite_url)
-    log(f"[JOIN_TRACKED] user={user_id} (@{username}) -> course={pending['course_name']} expires={pending['end_date']}")
+            log(f"[EXPIRY] Error on paid user {user_id}: {e}")

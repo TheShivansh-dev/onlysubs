@@ -15,6 +15,12 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 
+-- Safe migration: add tg_id (Telegram user/group id of the panel account)
+DO $$ BEGIN
+  ALTER TABLE admin_panel_users ADD COLUMN tg_id BIGINT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
 CREATE TABLE IF NOT EXISTS registered_users (
     id                 SERIAL PRIMARY KEY,
     userid             BIGINT       NOT NULL,
@@ -29,16 +35,48 @@ CREATE TABLE IF NOT EXISTS registered_users (
     removed_date       DATE
 );
 
+-- UniqueIds claimed via the external-website deep link.
+-- Approach A (trust-on-first-use): a row is created the first time a
+-- UniqueId is seen, bound to the Telegram user who claimed it.
 CREATE TABLE IF NOT EXISTS guids (
-    id       SERIAL PRIMARY KEY,
-    guid     VARCHAR(20) UNIQUE NOT NULL,
-    is_used  SMALLINT    DEFAULT 0
+    id             SERIAL PRIMARY KEY,
+    guid           VARCHAR(64) UNIQUE NOT NULL,
+    is_used        SMALLINT    DEFAULT 0,
+    claimed_userid BIGINT,
+    claimed_date   DATE
 );
+
+-- Safe migrations for an existing guids table
+DO $$ BEGIN
+  ALTER TABLE guids ADD COLUMN claimed_userid BIGINT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE guids ADD COLUMN claimed_date DATE;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS courses (
     id          SERIAL PRIMARY KEY,
-    course_name VARCHAR(200) NOT NULL
+    course_name VARCHAR(200) NOT NULL,
+    course_code VARCHAR(50),
+    group_link  TEXT,
+    group_id    BIGINT
 );
+
+-- Safe migrations for an existing courses table
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN course_code VARCHAR(50);
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN group_link TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN group_id BIGINT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS master_groups (
     id          SERIAL PRIMARY KEY,

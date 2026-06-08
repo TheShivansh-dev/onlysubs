@@ -10,10 +10,10 @@ services:
         sync: false          # set in Render dashboard
       - key: JWT_SECRET
         sync: false
-      - key: ADMIN_USERNAME
-        value: admin
-      - key: ADMIN_PASSWORD
-        sync: false
+      - key: OWNER_EMAIL
+        sync: false          # owner login email
+      - key: OWNER_PASSWORD
+        sync: false          # owner login password
       - key: BOT_TOKEN
         sync: false
 
@@ -27,10 +27,4 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: BOT_TOKEN
-        sync: false
-      - key: JWT_SECRET
-        sync: false
-      - key: ADMIN_USERNAME
-        value: admin
-      - key: ADMIN_PASSWORD
         sync: false

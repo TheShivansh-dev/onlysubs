@@ -189,22 +189,47 @@ def db_get_all_groups() -> list[dict]:
 #  Courses
 # ─────────────────────────────────────────────
 
+_COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id"]
+
+
 def db_load_courses() -> pd.DataFrame:
-    """Return courses table as a DataFrame with columns ['id', 'course_name']."""
+    """Return courses table as a DataFrame."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, course_name FROM courses ORDER BY id")
+            cur.execute(
+                "SELECT id, course_name, course_code, group_link, group_id "
+                "FROM courses ORDER BY id"
+            )
             rows = cur.fetchall()
     if not rows:
-        return pd.DataFrame(columns=["id", "course_name"])
-    return pd.DataFrame(rows, columns=["id", "course_name"])
+        return pd.DataFrame(columns=_COURSE_COLS)
+    return pd.DataFrame(rows, columns=_COURSE_COLS)
 
 
-def db_save_course(course_name: str):
-    """Insert a new course."""
+def db_save_course(course_name: str, course_code: str = "",
+                   group_link: str = "", group_id: Optional[int] = None):
+    """Insert a new course (or update group info if the code already exists)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO courses (course_name) VALUES (%s)", (course_name,))
+            if course_code:
+                cur.execute(
+                    "SELECT id FROM courses WHERE LOWER(course_code)=LOWER(%s) LIMIT 1",
+                    (course_code,),
+                )
+                existing = cur.fetchone()
+            else:
+                existing = None
+            if existing:
+                cur.execute(
+                    "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s WHERE id=%s",
+                    (course_name, group_link, group_id, existing[0]),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO courses (course_name, course_code, group_link, group_id) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (course_name, course_code, group_link, group_id),
+                )
 
 
 def db_delete_course(course_id: int):
@@ -214,66 +239,75 @@ def db_delete_course(course_id: int):
             cur.execute("DELETE FROM courses WHERE id=%s", (course_id,))
 
 
+def db_get_course_by_code(course_code: str) -> Optional[dict]:
+    """Look up a course by its code (case-insensitive)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, course_name, course_code, group_link, group_id "
+                "FROM courses WHERE LOWER(course_code)=LOWER(%s) LIMIT 1",
+                (course_code,),
+            )
+            row = cur.fetchone()
+    return dict(zip(_COURSE_COLS, row)) if row else None
+
+
+def db_get_course_by_name(course_name: str) -> Optional[dict]:
+    """Look up a course by its name (case-insensitive)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, course_name, course_code, group_link, group_id "
+                "FROM courses WHERE LOWER(TRIM(course_name))=LOWER(TRIM(%s)) LIMIT 1",
+                (course_name,),
+            )
+            row = cur.fetchone()
+    return dict(zip(_COURSE_COLS, row)) if row else None
+
+
 # ─────────────────────────────────────────────
 #  GUIDs
 # ─────────────────────────────────────────────
 
-def db_generate_guids(count: int = 100) -> int:
-    """Generate `count` new GUIDs and insert into DB. Returns actual count inserted."""
-    rows = [(uuid.uuid4().hex[:8],) for _ in range(count)]
-    inserted = 0
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            for (g,) in rows:
-                try:
-                    cur.execute("INSERT INTO guids (guid, is_used) VALUES (%s, 0)", (g,))
-                    inserted += 1
-                except psycopg2.errors.UniqueViolation:
-                    conn.rollback()
-    return inserted
-
-
-def db_verify_guid(guid: str) -> str:
+def db_get_claimed_link(guid: str) -> Optional[dict]:
     """
-    Returns 'ok' (unused), 'used' (already used), or 'not_found'.
-    Import GUID_OK / GUID_USED / GUID_NOT_FOUND from config for comparison.
+    Return {'claimed_userid', 'claimed_date'} for a UniqueId that has already
+    been claimed, or None if it has never been used (Approach A: trust-on-first-use).
     """
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT is_used FROM guids WHERE guid=%s", (guid,))
-            row = cur.fetchone()
-    if row is None:
-        return "not_found"
-    return "ok" if int(row[0]) == 0 else "used"
-
-
-def db_mark_guid_used(guid: str):
-    """Mark a GUID as used."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("UPDATE guids SET is_used=1 WHERE guid=%s", (guid,))
-
-
-def db_get_guid_samples(n: int = 3) -> list[str]:
-    """Return up to n unused GUID strings (most recently inserted)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT guid FROM guids WHERE is_used=0 ORDER BY id DESC LIMIT %s", (n,)
+                "SELECT claimed_userid, claimed_date FROM guids WHERE guid=%s LIMIT 1",
+                (guid,),
             )
-            rows = cur.fetchall()
-    return [r[0] for r in rows]
+            row = cur.fetchone()
+    if row is None:
+        return None
+    return {"claimed_userid": int(row[0]) if row[0] is not None else None,
+            "claimed_date": str(row[1]) if row[1] is not None else None}
+
+
+def db_claim_link(guid: str, userid: int):
+    """Bind a UniqueId to the Telegram user who claimed it (idempotent)."""
+    today = str(date.today())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO guids (guid, is_used, claimed_userid, claimed_date) "
+                "VALUES (%s, 1, %s, %s) "
+                "ON CONFLICT (guid) DO UPDATE SET is_used=1, "
+                "claimed_userid=EXCLUDED.claimed_userid, claimed_date=EXCLUDED.claimed_date",
+                (guid, userid, today),
+            )
 
 
 def db_get_guid_stats() -> dict:
-    """Return {'available': int, 'used': int, 'total': int}."""
+    """Return {'claimed': int} — how many UniqueIds have been used."""
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM guids WHERE is_used=0")
-            available = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM guids WHERE is_used=1")
-            used = cur.fetchone()[0]
-    return {"available": available, "used": used, "total": available + used}
+            cur.execute("SELECT COUNT(*) FROM guids WHERE claimed_userid IS NOT NULL")
+            claimed = cur.fetchone()[0]
+    return {"claimed": claimed}
 
 
 # ─────────────────────────────────────────────
@@ -405,6 +439,17 @@ def db_remove_registered_user(user_id: int, removed_date: str):
             )
 
 
+def db_extend_registered_user(user_id: int, new_end_date: str):
+    """Push out the expiry date of an active registered user (used by 'Save')."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE registered_users SET end_date=%s "
+                "WHERE userid=%s AND isremoved=0",
+                (new_end_date, user_id),
+            )
+
+
 def db_get_user_by_userid(user_id: int) -> Optional[dict]:
     """Return the most recent active registered_user row for this user_id, or None."""
     cols = ["id", "userid", "username", "end_date", "plan_type", "isremoved",
@@ -433,15 +478,15 @@ def db_get_stats() -> dict:
             total_users = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM courses")
             total_courses = cur.fetchone()[0]
-            cur.execute("SELECT COUNT(*) FROM guids WHERE is_used=0")
-            available_guids = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM guids WHERE claimed_userid IS NOT NULL")
+            claimed_links = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM paid_users WHERE is_active=1")
             active_paid = cur.fetchone()[0]
     return {
         "active_users": active_users,
         "total_users": total_users,
         "total_courses": total_courses,
-        "available_guids": available_guids,
+        "claimed_links": claimed_links,
         "active_paid_users": active_paid,
     }
 
@@ -481,6 +526,16 @@ def db_edit_paid_user(user_id: int, course: str, start_date: str, end_date: str)
             cur.execute(
                 "UPDATE paid_users SET course=%s, start_date=%s, end_date=%s WHERE user_id=%s",
                 (course, start_date, end_date, user_id),
+            )
+
+
+def db_extend_paid_user(user_id: int, new_end_date: str):
+    """Push out the expiry date of an active paid user (used by 'Save')."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE paid_users SET end_date=%s WHERE user_id=%s AND is_active=1",
+                (new_end_date, user_id),
             )
 
 
@@ -534,22 +589,26 @@ def db_get_admin_user(username: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, username, password_hash, role FROM admin_panel_users WHERE username=%s",
+                "SELECT id, username, password_hash, role, tg_id "
+                "FROM admin_panel_users WHERE username=%s",
                 (username,),
             )
             row = cur.fetchone()
     if not row:
         return None
-    return {"id": row[0], "username": row[1], "password_hash": row[2], "role": row[3]}
+    return {"id": row[0], "username": row[1], "password_hash": row[2],
+            "role": row[3], "tg_id": row[4]}
 
 
-def db_create_admin_user(username: str, password_hash: str, role: str = "admin"):
+def db_create_admin_user(username: str, password_hash: str, role: str = "admin",
+                         tg_id: Optional[int] = None):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO admin_panel_users (username, password_hash, role) VALUES (%s, %s, %s) "
+                "INSERT INTO admin_panel_users (username, password_hash, role, tg_id) "
+                "VALUES (%s, %s, %s, %s) "
                 "ON CONFLICT (username) DO NOTHING",
-                (username, password_hash, role),
+                (username, password_hash, role, tg_id),
             )
 
 
@@ -557,18 +616,19 @@ def db_get_all_admin_users() -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, username, role, created_at FROM admin_panel_users ORDER BY id"
+                "SELECT id, username, role, tg_id, created_at FROM admin_panel_users ORDER BY id"
             )
             rows = cur.fetchall()
-    return [{"id": r[0], "username": r[1], "role": r[2], "created_at": str(r[3])} for r in rows]
+    return [{"id": r[0], "username": r[1], "role": r[2], "tg_id": r[3],
+             "created_at": str(r[4])} for r in rows]
 
 
 def db_remove_admin_user(username: str) -> bool:
-    """Remove an admin — superadmin accounts cannot be deleted."""
+    """Remove a panel account. The owner account can never be deleted."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "DELETE FROM admin_panel_users WHERE username=%s AND role='admin'",
+                "DELETE FROM admin_panel_users WHERE username=%s AND role <> 'owner'",
                 (username,),
             )
             return cur.rowcount > 0
@@ -581,6 +641,20 @@ def db_change_admin_password(username: str, new_hash: str):
                 "UPDATE admin_panel_users SET password_hash=%s WHERE username=%s",
                 (new_hash, username),
             )
+
+
+def db_update_admin_username(old_username: str, new_username: str) -> bool:
+    """Change a panel account's login email. Returns False on a name clash."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM admin_panel_users WHERE username=%s", (new_username,))
+            if cur.fetchone():
+                return False
+            cur.execute(
+                "UPDATE admin_panel_users SET username=%s WHERE username=%s",
+                (new_username, old_username),
+            )
+            return cur.rowcount > 0
 
 
 # ─────────────────────────────────────────────

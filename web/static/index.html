@@ -219,13 +219,14 @@
     <nav>
       <a class="nav-link active" href="#" data-tab="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a class="nav-link" href="#" data-tab="users"><i class="bi bi-people-fill"></i> Users</a>
-      <a class="nav-link" href="#" data-tab="paid-users"><i class="bi bi-person-check-fill"></i> Paid Users</a>
-      <a class="nav-link" href="#" data-tab="courses"><i class="bi bi-book-fill"></i> Courses</a>
-      <a class="nav-link" href="#" data-tab="groups"><i class="bi bi-collection-fill"></i> Groups</a>
-      <a class="nav-link" href="#" data-tab="guids"><i class="bi bi-key-fill"></i> GUIDs</a>
-      <a class="nav-link" href="#" data-tab="pending-invites"><i class="bi bi-envelope-fill"></i> Pending Invites</a>
-      <a class="nav-link superadmin-only" href="#" data-tab="admins"    style="display:none"><i class="bi bi-shield-fill-check"></i> Admins</a>
-      <a class="nav-link superadmin-only" href="#" data-tab="settings" style="display:none"><i class="bi bi-gear-fill"></i> Settings</a>
+      <a class="nav-link manager-only" href="#" data-tab="paid-users" style="display:none"><i class="bi bi-person-check-fill"></i> Paid Users</a>
+      <a class="nav-link manager-only" href="#" data-tab="courses" style="display:none"><i class="bi bi-book-fill"></i> Courses</a>
+      <a class="nav-link manager-only" href="#" data-tab="groups" style="display:none"><i class="bi bi-collection-fill"></i> Groups</a>
+      <a class="nav-link manager-only" href="#" data-tab="guids" style="display:none"><i class="bi bi-link-45deg"></i> Links</a>
+      <a class="nav-link manager-only" href="#" data-tab="pending-invites" style="display:none"><i class="bi bi-envelope-fill"></i> Pending Invites</a>
+      <a class="nav-link manager-only" href="#" data-tab="admins"    style="display:none"><i class="bi bi-shield-fill-check"></i> Accounts</a>
+      <a class="nav-link manager-only" href="#" data-tab="settings" style="display:none"><i class="bi bi-gear-fill"></i> Settings</a>
+      <a class="nav-link" href="#" data-tab="profile"><i class="bi bi-person-circle"></i> Profile</a>
     </nav>
     <div class="logout-wrap">
       <button class="btn btn-outline-secondary btn-sm w-100" id="logout-btn"><i class="bi bi-box-arrow-left me-1"></i>Logout</button>
@@ -263,8 +264,8 @@
         </div>
         <div class="col-sm-6 col-xl-3">
           <div class="stat-card purple">
-            <div class="icon"><i class="bi bi-key-fill"></i></div>
-            <div><div class="value" id="st-guids">–</div><div class="label">Available GUIDs</div></div>
+            <div class="icon"><i class="bi bi-link-45deg"></i></div>
+            <div><div class="value" id="st-guids">–</div><div class="label">Links Used</div></div>
           </div>
         </div>
       </div>
@@ -280,9 +281,20 @@
     <!-- ── Users ── -->
     <div class="tab-pane" id="tab-users">
       <div class="section-card">
-        <div class="sc-header">
-          <h6><i class="bi bi-people-fill me-2"></i>Registered Users</h6>
-          <input type="text" class="form-control form-control-sm search-box" id="users-search" placeholder="Search ID or username…" />
+        <div class="sc-header flex-wrap gap-2">
+          <h6 class="mb-0"><i class="bi bi-people-fill me-2"></i>All Subscribers</h6>
+          <div class="d-flex flex-wrap gap-2">
+            <select class="form-select form-select-sm" id="users-course-filter" style="max-width:180px">
+              <option value="">All courses</option>
+            </select>
+            <select class="form-select form-select-sm" id="users-status-filter" style="max-width:140px">
+              <option value="">All status</option>
+              <option value="active">Active</option>
+              <option value="expiring">Expiring (≤5d)</option>
+              <option value="expired">Expired/Removed</option>
+            </select>
+            <input type="text" class="form-control form-control-sm search-box" id="users-search" placeholder="Search ID or username…" />
+          </div>
         </div>
         <div class="sc-body p-0">
           <div class="table-responsive">
@@ -292,9 +304,10 @@
                   <th>#</th>
                   <th>Telegram ID</th>
                   <th>Username</th>
-                  <th>Plan</th>
-                  <th>Registered</th>
+                  <th>Course</th>
+                  <th>Joined</th>
                   <th>Expires</th>
+                  <th>Days Left</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -302,6 +315,7 @@
               <tbody id="users-tbody"></tbody>
             </table>
           </div>
+          <div class="px-3 py-2 small text-muted border-top" id="users-count"></div>
         </div>
       </div>
     </div>
@@ -346,16 +360,21 @@
                   <input type="text" class="form-control form-control-sm" id="pu-username" placeholder="@username" />
                 </div>
                 <div class="mb-2">
-                  <label class="form-label small fw-semibold">Course</label>
-                  <input type="text" class="form-control form-control-sm" id="pu-course" placeholder="stemTreky" required />
+                  <label class="form-label small fw-semibold">Course Name</label>
+                  <input type="text" class="form-control form-control-sm" id="pu-course" placeholder="Stem Treaky Course" required />
                 </div>
                 <div class="mb-2">
-                  <label class="form-label small fw-semibold">Start Date</label>
-                  <input type="date" class="form-control form-control-sm" id="pu-start" required />
+                  <label class="form-label small fw-semibold">Months</label>
+                  <input type="number" class="form-control form-control-sm" id="pu-months" min="1" value="1" required />
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Group ID <span class="text-danger">*</span></label>
+                  <input type="number" class="form-control form-control-sm" id="pu-groupid" placeholder="-1001234567890" />
+                  <div class="form-text">Bot must be admin here (for invite &amp; auto-remove).</div>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label small fw-semibold">End Date</label>
-                  <input type="date" class="form-control form-control-sm" id="pu-end" required />
+                  <label class="form-label small fw-semibold">Group Link <span class="text-muted">(optional)</span></label>
+                  <input type="text" class="form-control form-control-sm" id="pu-grouplink" placeholder="https://t.me/+abc123" />
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add User</button>
               </form>
@@ -373,7 +392,7 @@
             <div class="sc-header"><h6><i class="bi bi-book-fill me-2"></i>Courses</h6></div>
             <div class="sc-body p-0">
               <table class="table table-hover mb-0" id="courses-table">
-                <thead><tr><th>#</th><th>Course Name</th><th></th></tr></thead>
+                <thead><tr><th>#</th><th>Course Name</th><th>Code</th><th>Group Link</th><th></th></tr></thead>
                 <tbody id="courses-tbody"></tbody>
               </table>
             </div>
@@ -384,9 +403,19 @@
             <div class="sc-header"><h6><i class="bi bi-plus-circle-fill me-2"></i>Add Course</h6></div>
             <div class="sc-body">
               <form id="add-course-form">
-                <div class="mb-3">
+                <div class="mb-2">
                   <label class="form-label small fw-semibold">Course Name</label>
-                  <input type="text" class="form-control form-control-sm" id="course-name-input" placeholder="e.g. Advanced Python" required />
+                  <input type="text" class="form-control form-control-sm" id="course-name-input" placeholder="e.g. Stem Treaky Course" required />
+                  <div class="form-text" id="course-code-preview"></div>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Group ID <span class="text-danger">*</span></label>
+                  <input type="number" class="form-control form-control-sm" id="course-groupid-input" placeholder="-1001234567890" />
+                  <div class="form-text">Bot must be admin here. Used to make one-time invites &amp; auto-remove.</div>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Group Link <span class="text-muted">(optional fallback)</span></label>
+                  <input type="text" class="form-control form-control-sm" id="course-grouplink-input" placeholder="https://t.me/+abc123" />
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add Course</button>
               </form>
@@ -413,45 +442,20 @@
       </div>
     </div>
 
-    <!-- ── GUIDs ── -->
+    <!-- ── Links Used ── -->
     <div class="tab-pane" id="tab-guids">
-      <div class="row g-3 mb-3">
-        <div class="col-4">
-          <div class="section-card text-center py-3">
-            <div class="guid-stat">
-              <div class="num text-success" id="guid-available">–</div>
-              <div class="lbl">Available</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-4">
-          <div class="section-card text-center py-3">
-            <div class="guid-stat">
-              <div class="num text-danger" id="guid-used">–</div>
-              <div class="lbl">Used</div>
-            </div>
-          </div>
-        </div>
-        <div class="col-4">
-          <div class="section-card text-center py-3">
-            <div class="guid-stat">
-              <div class="num text-primary" id="guid-total">–</div>
-              <div class="lbl">Total</div>
-            </div>
-          </div>
-        </div>
-      </div>
       <div class="section-card" style="max-width:400px">
-        <div class="sc-header"><h6><i class="bi bi-key-fill me-2"></i>Generate GUIDs</h6></div>
-        <div class="sc-body">
-          <form id="gen-guid-form" class="d-flex gap-2 align-items-end">
-            <div class="flex-grow-1">
-              <label class="form-label small fw-semibold">Count</label>
-              <input type="number" class="form-control form-control-sm" id="guid-count" value="100" min="1" max="10000" required />
-            </div>
-            <button type="submit" class="btn btn-primary btn-sm fw-semibold">Generate</button>
-          </form>
-          <div id="guid-gen-result" class="mt-2 small text-muted"></div>
+        <div class="sc-header"><h6><i class="bi bi-link-45deg me-2"></i>Access Links</h6></div>
+        <div class="sc-body text-center py-4">
+          <div class="guid-stat">
+            <div class="num text-primary" id="guid-claimed">–</div>
+            <div class="lbl">Unique links used so far</div>
+          </div>
+          <p class="text-muted small mt-3 mb-0">
+            Links are generated by the external website as
+            <code>UniqueId_CourseCode_Months</code>. Each one works only once,
+            for the first Telegram user who opens it.
+          </p>
         </div>
       </div>
     </div>
@@ -473,26 +477,27 @@
       </div>
     </div>
 
-    <!-- ── Admins tab (superadmin only) ── -->
+    <!-- ── Accounts tab (owner + superadmin) ── -->
     <div class="tab-pane" id="tab-admins">
       <div class="section-card mb-3">
-        <div class="sc-header"><h6><i class="bi bi-person-plus-fill me-2"></i>Add Admin</h6></div>
+        <div class="sc-header"><h6><i class="bi bi-person-plus-fill me-2"></i>Add Account</h6></div>
         <div class="sc-body">
           <form id="add-admin-form" class="row g-2 align-items-end">
             <div class="col-md-3">
-              <label class="form-label small fw-semibold">Username</label>
-              <input id="new-admin-user" class="form-control form-control-sm" placeholder="username" required />
+              <label class="form-label small fw-semibold">Login Email</label>
+              <input id="new-admin-user" type="email" class="form-control form-control-sm" placeholder="name@email.com" required />
             </div>
             <div class="col-md-3">
               <label class="form-label small fw-semibold">Password</label>
               <input id="new-admin-pass" type="password" class="form-control form-control-sm" placeholder="min 6 chars" required />
             </div>
             <div class="col-md-2">
+              <label class="form-label small fw-semibold">Telegram ID</label>
+              <input id="new-admin-tg" type="number" class="form-control form-control-sm" placeholder="optional" />
+            </div>
+            <div class="col-md-2">
               <label class="form-label small fw-semibold">Role</label>
-              <select id="new-admin-role" class="form-select form-select-sm">
-                <option value="admin">Admin</option>
-                <option value="superadmin">SuperAdmin</option>
-              </select>
+              <select id="new-admin-role" class="form-select form-select-sm"></select>
             </div>
             <div class="col-md-2">
               <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
@@ -501,11 +506,11 @@
         </div>
       </div>
       <div class="section-card">
-        <div class="sc-header"><h6><i class="bi bi-people-fill me-2"></i>Admin Accounts</h6></div>
+        <div class="sc-header"><h6><i class="bi bi-people-fill me-2"></i>Accounts</h6></div>
         <div class="sc-body p-0">
           <div class="table-responsive">
             <table class="table table-hover mb-0">
-              <thead><tr><th>#</th><th>Username</th><th>Role</th><th>Created</th><th>Change Password</th><th>Remove</th></tr></thead>
+              <thead><tr><th>#</th><th>Email</th><th>Role</th><th>Telegram ID</th><th>Created</th><th>Change Password</th><th>Remove</th></tr></thead>
               <tbody id="admins-tbody"></tbody>
             </table>
           </div>
@@ -513,8 +518,64 @@
       </div>
     </div>
 
+    <!-- ── Profile tab (everyone) ── -->
+    <div class="tab-pane" id="tab-profile">
+      <div class="row g-3">
+        <div class="col-lg-6">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-person-circle me-2"></i>My Profile</h6></div>
+            <div class="sc-body">
+              <p class="small text-muted mb-1">Role: <strong id="me-role">–</strong></p>
+              <p class="small text-muted">Telegram ID: <strong id="me-tg">–</strong></p>
+              <hr>
+              <form id="me-email-form" class="mb-3">
+                <label class="form-label small fw-semibold">Login Email</label>
+                <div class="input-group input-group-sm">
+                  <input id="me-email" type="email" class="form-control" required />
+                  <button class="btn btn-primary" type="submit">Update Email</button>
+                </div>
+                <div class="form-text">Changing your email logs you out — sign in again with the new one.</div>
+              </form>
+              <form id="me-pass-form">
+                <label class="form-label small fw-semibold">New Password</label>
+                <div class="input-group input-group-sm">
+                  <input id="me-pass" type="password" class="form-control" placeholder="min 6 chars" required />
+                  <button class="btn btn-primary" type="submit">Update Password</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Settings tab (superadmin only) ── -->
     <div class="tab-pane" id="tab-settings">
+      <div class="section-card mb-3">
+        <div class="sc-header">
+          <h6><i class="bi bi-people-fill me-2"></i>Admin Group</h6>
+          <span class="text-muted small">Where expiry Save/Remove cards are posted</span>
+        </div>
+        <div class="sc-body">
+          <p class="small text-muted mb-2">Current: <strong id="admin-group-current">–</strong></p>
+          <form id="admin-group-form" class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label small fw-semibold">Group ID</label>
+              <input type="number" class="form-control form-control-sm" id="ag-id" placeholder="-1001234567890" required />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small fw-semibold">Group Name <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="ag-name" placeholder="My Admin Group" />
+            </div>
+            <div class="col-md-2">
+              <button type="submit" class="btn btn-primary btn-sm w-100">Save</button>
+            </div>
+            <div class="col-md-2">
+              <button type="button" class="btn btn-outline-danger btn-sm w-100" id="ag-clear">Clear</button>
+            </div>
+          </form>
+        </div>
+      </div>
       <div class="section-card">
         <div class="sc-header">
           <h6><i class="bi bi-gear-fill me-2"></i>Bot Settings</h6>
@@ -546,6 +607,7 @@ function getToken() { return localStorage.getItem('admin_token'); }
 function setToken(t) { localStorage.setItem('admin_token', t); }
 function clearToken() { localStorage.removeItem('admin_token'); }
 function getRole()  { return localStorage.getItem('admin_role') || 'admin'; }
+function isManager(){ return ['owner', 'superadmin'].includes(getRole()); }
 function setRole(r) { localStorage.setItem('admin_role', r); }
 function clearRole(){ localStorage.removeItem('admin_role'); }
 
@@ -621,9 +683,10 @@ document.getElementById('login-form').addEventListener('submit', async e => {
 function showApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-screen').style.display   = 'block';
-  // Show Admins tab only for superadmin
-  document.querySelectorAll('.superadmin-only').forEach(el => {
-    el.style.display = getRole() === 'superadmin' ? '' : 'none';
+  // Accounts + Settings tabs are for owner and superadmin only
+  const isManager = ['owner', 'superadmin'].includes(getRole());
+  document.querySelectorAll('.manager-only').forEach(el => {
+    el.style.display = isManager ? '' : 'none';
   });
   switchTab('dashboard');
 }
@@ -642,14 +705,15 @@ document.getElementById('logout-btn').addEventListener('click', logout);
 // ══════════════════════════════════════════════════════════════
 const TAB_TITLES = {
   'dashboard':      'Dashboard',
-  'users':          'Registered Users',
+  'users':          'All Subscribers',
   'paid-users':     'Paid Users',
   'courses':        'Courses',
   'groups':         'Groups',
-  'guids':          'GUIDs',
+  'guids':          'Access Links',
   'pending-invites':'Pending Invites',
-  'admins':         'Admin Accounts',
+  'admins':         'Accounts',
   'settings':       'Bot Settings',
+  'profile':        'My Profile',
 };
 
 function switchTab(name) {
@@ -674,6 +738,7 @@ function switchTab(name) {
   if (name === 'pending-invites') loadPendingInvites();
   if (name === 'admins')          loadAdmins();
   if (name === 'settings')        loadSettings();
+  if (name === 'profile')         loadProfile();
 }
 
 document.querySelectorAll('.sidebar nav .nav-link').forEach(link => {
@@ -693,7 +758,7 @@ async function loadStats() {
   document.getElementById('st-active-users').textContent  = d.active_users   ?? '–';
   document.getElementById('st-paid-users').textContent    = d.active_paid_users ?? '–';
   document.getElementById('st-courses').textContent       = d.total_courses   ?? '–';
-  document.getElementById('st-guids').textContent         = d.available_guids ?? '–';
+  document.getElementById('st-guids').textContent         = d.claimed_links   ?? '–';
   document.getElementById('st-total-users').textContent   = d.total_users     ?? '–';
 }
 
@@ -702,17 +767,61 @@ async function loadStats() {
 // ══════════════════════════════════════════════════════════════
 let _allUsers = [];
 
+function _daysLeft(endDate) {
+  if (!endDate) return null;
+  const end = new Date(endDate + 'T00:00:00');
+  if (isNaN(end)) return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  return Math.round((end - today) / 86400000);
+}
+
 async function loadUsers() {
   const res = await apiFetch('/api/users');
   if (!res) return;
   _allUsers = await res.json();
-  renderUsers(_allUsers);
+  // Populate course filter with the distinct courses present
+  const courses = [...new Set(_allUsers.map(u => u.plan_type).filter(Boolean))].sort();
+  const sel = document.getElementById('users-course-filter');
+  sel.innerHTML = '<option value="">All courses</option>' +
+    courses.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  applyUserFilters();
+}
+
+function applyUserFilters() {
+  const q       = document.getElementById('users-search').value.toLowerCase();
+  const course  = document.getElementById('users-course-filter').value;
+  const status  = document.getElementById('users-status-filter').value;
+
+  const filtered = _allUsers.filter(u => {
+    if (q && !(String(u.userid).includes(q) || String(u.username || '').toLowerCase().includes(q))) return false;
+    if (course && u.plan_type !== course) return false;
+    if (status) {
+      const d = _daysLeft(u.end_date);
+      if (status === 'active'   && (u.isremoved || d === null || d < 0)) return false;
+      if (status === 'expiring' && (u.isremoved || d === null || d < 0 || d > 5)) return false;
+      if (status === 'expired'  && !(u.isremoved || (d !== null && d < 0))) return false;
+    }
+    return true;
+  });
+  renderUsers(filtered);
 }
 
 function renderUsers(users) {
   const tbody = document.getElementById('users-tbody');
-  if (!users.length) { tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">No users found</td></tr>'; return; }
-  tbody.innerHTML = users.map((u, i) => `
+  const countEl = document.getElementById('users-count');
+  if (!users.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">No users found</td></tr>';
+    countEl.textContent = '0 users';
+    return;
+  }
+  tbody.innerHTML = users.map((u, i) => {
+    const d = _daysLeft(u.end_date);
+    const dl = u.isremoved ? '–'
+      : d === null ? '–'
+      : d < 0 ? `<span class="text-danger">${d}</span>`
+      : d <= 5 ? `<span class="text-warning fw-semibold">${d}</span>`
+      : d;
+    return `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td><code>${escHtml(u.userid)}</code></td>
@@ -720,20 +829,18 @@ function renderUsers(users) {
       <td><span class="badge bg-light text-dark border">${escHtml(u.plan_type || '–')}</span></td>
       <td>${escHtml(u.registration_date || '–')}</td>
       <td>${escHtml(u.end_date || '–')}</td>
+      <td>${dl}</td>
       <td>${statusBadge(!u.isremoved)}</td>
       <td>
-        ${!u.isremoved ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
+        ${(!u.isremoved && isManager()) ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
+  countEl.textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
 }
 
-document.getElementById('users-search').addEventListener('input', e => {
-  const q = e.target.value.toLowerCase();
-  const filtered = _allUsers.filter(u =>
-    String(u.userid).includes(q) ||
-    String(u.username || '').toLowerCase().includes(q)
-  );
-  renderUsers(filtered);
+['users-search', 'users-course-filter', 'users-status-filter'].forEach(id => {
+  document.getElementById(id).addEventListener('input', applyUserFilters);
 });
 
 async function removeUser(userId) {
@@ -768,12 +875,14 @@ async function loadPaidUsers() {
 
 document.getElementById('add-paid-form').addEventListener('submit', async e => {
   e.preventDefault();
+  const groupId = document.getElementById('pu-groupid').value;
   const body = {
     user_id:    parseInt(document.getElementById('pu-user-id').value),
     username:   document.getElementById('pu-username').value.trim(),
     course:     document.getElementById('pu-course').value.trim(),
-    start_date: document.getElementById('pu-start').value,
-    end_date:   document.getElementById('pu-end').value,
+    months:     parseInt(document.getElementById('pu-months').value) || 1,
+    group_link: document.getElementById('pu-grouplink').value.trim(),
+    group_id:   groupId ? parseInt(groupId) : null,
   };
   const res = await apiFetch('/api/paid-users', { method: 'POST', body: JSON.stringify(body) });
   if (res && res.ok) {
@@ -801,21 +910,38 @@ async function loadCourses() {
   if (!res) return;
   const courses = await res.json();
   const tbody = document.getElementById('courses-tbody');
-  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
+  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
   tbody.innerHTML = courses.map((c, i) => `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td>${escHtml(c.course_name)}</td>
+      <td><code>${escHtml(c.course_code || '–')}</code></td>
+      <td class="small text-truncate" style="max-width:220px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
       <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Delete</button></td>
     </tr>`).join('');
 }
+
+// Live course-code preview
+function _courseCode(name) {
+  return (name || '').trim().split(/\s+/).filter(Boolean).map(w => w.slice(0, 2)).join('');
+}
+document.getElementById('course-name-input').addEventListener('input', e => {
+  const code = _courseCode(e.target.value);
+  document.getElementById('course-code-preview').textContent = code ? `Code: ${code}` : '';
+});
 
 document.getElementById('add-course-form').addEventListener('submit', async e => {
   e.preventDefault();
   const name = document.getElementById('course-name-input').value.trim();
   if (!name) return;
-  const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify({ course_name: name }) });
-  if (res && res.ok) { toast('Course added'); e.target.reset(); loadCourses(); }
+  const groupId = document.getElementById('course-groupid-input').value;
+  const body = {
+    course_name: name,
+    group_link:  document.getElementById('course-grouplink-input').value.trim(),
+    group_id:    groupId ? parseInt(groupId) : null,
+  };
+  const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify(body) });
+  if (res && res.ok) { toast('Course added'); e.target.reset(); document.getElementById('course-code-preview').textContent = ''; loadCourses(); }
   else toast('Failed to add course', 'error');
 });
 
@@ -854,26 +980,8 @@ async function loadGuidStats() {
   const res = await apiFetch('/api/guids');
   if (!res) return;
   const d = await res.json();
-  document.getElementById('guid-available').textContent = d.available ?? '–';
-  document.getElementById('guid-used').textContent      = d.used      ?? '–';
-  document.getElementById('guid-total').textContent     = d.total     ?? '–';
+  document.getElementById('guid-claimed').textContent = d.claimed ?? '–';
 }
-
-document.getElementById('gen-guid-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const count = parseInt(document.getElementById('guid-count').value) || 100;
-  const res   = await apiFetch('/api/guids/generate', { method: 'POST', body: JSON.stringify({ count }) });
-  const resultEl = document.getElementById('guid-gen-result');
-  if (res && res.ok) {
-    const d = await res.json();
-    resultEl.textContent = `Generated ${d.inserted} new GUIDs.`;
-    toast(`${d.inserted} GUIDs generated`);
-    loadGuidStats();
-  } else {
-    resultEl.textContent = 'Failed to generate GUIDs.';
-    toast('Failed', 'error');
-  }
-});
 
 // ══════════════════════════════════════════════════════════════
 //  Pending Invites
@@ -902,17 +1010,30 @@ async function loadPendingInvites() {
 // ══════════════════════════════════════════════════════════════
 //  Admins  (superadmin only)
 // ══════════════════════════════════════════════════════════════
+const ROLE_BADGE = { owner: 'bg-dark', superadmin: 'bg-danger', admin: 'bg-primary' };
+
+function _populateRoleOptions() {
+  // owner can create superadmin + admin; superadmin can create admin only
+  const sel = document.getElementById('new-admin-role');
+  const opts = getRole() === 'owner'
+    ? [['admin', 'Admin'], ['superadmin', 'SuperAdmin']]
+    : [['admin', 'Admin']];
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+}
+
 async function loadAdmins() {
+  _populateRoleOptions();
   const res = await apiFetch('/api/admins');
   if (!res) return;
   const admins = await res.json();
   const tbody = document.getElementById('admins-tbody');
-  if (!admins.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No admins</td></tr>'; return; }
+  if (!admins.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No accounts</td></tr>'; return; }
   tbody.innerHTML = admins.map((a, i) => `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td><strong>${escHtml(a.username)}</strong></td>
-      <td><span class="badge ${a.role === 'superadmin' ? 'bg-danger' : 'bg-primary'}">${escHtml(a.role)}</span></td>
+      <td><span class="badge ${ROLE_BADGE[a.role] || 'bg-secondary'}">${escHtml(a.role)}</span></td>
+      <td class="text-muted small">${a.tg_id != null ? escHtml(a.tg_id) : '–'}</td>
       <td class="text-muted small">${escHtml((a.created_at || '').slice(0, 10))}</td>
       <td>
         <div class="input-group input-group-sm" style="max-width:220px">
@@ -920,11 +1041,7 @@ async function loadAdmins() {
           <button class="btn btn-outline-secondary btn-sm" onclick="changeAdminPassword('${escHtml(a.username)}')">Set</button>
         </div>
       </td>
-      <td>
-        ${a.role !== 'superadmin'
-          ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button>`
-          : '<span class="text-muted small">–</span>'}
-      </td>
+      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button></td>
     </tr>`).join('');
 }
 
@@ -933,18 +1050,53 @@ document.getElementById('add-admin-form').addEventListener('submit', async e => 
   const username = document.getElementById('new-admin-user').value.trim();
   const password = document.getElementById('new-admin-pass').value;
   const role     = document.getElementById('new-admin-role').value;
+  const tgRaw    = document.getElementById('new-admin-tg').value;
   const res = await apiFetch('/api/admins', {
     method: 'POST',
-    body: JSON.stringify({ username, password, role }),
+    body: JSON.stringify({ username, password, role, tg_id: tgRaw ? parseInt(tgRaw) : null }),
   });
   if (res && res.status === 201) {
-    toast('Admin added');
-    document.getElementById('new-admin-user').value = '';
-    document.getElementById('new-admin-pass').value = '';
+    toast('Account added');
+    e.target.reset();
+    _populateRoleOptions();
     loadAdmins();
   } else {
     const d = res ? await res.json().catch(() => ({})) : {};
-    toast(d.detail || 'Failed to add admin', 'error');
+    toast(d.detail || 'Failed to add account', 'error');
+  }
+});
+
+// ── Profile ──
+async function loadProfile() {
+  const res = await apiFetch('/api/me');
+  if (!res) return;
+  const me = await res.json();
+  document.getElementById('me-role').textContent = me.role || '–';
+  document.getElementById('me-tg').textContent   = me.tg_id != null ? me.tg_id : '–';
+  document.getElementById('me-email').value      = me.username || '';
+}
+
+document.getElementById('me-email-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const new_email = document.getElementById('me-email').value.trim();
+  const res = await apiFetch('/api/me/email', { method: 'PUT', body: JSON.stringify({ new_email }) });
+  if (res && res.ok) {
+    toast('Email updated — please sign in again');
+    setTimeout(logout, 1200);
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to update email', 'error');
+  }
+});
+
+document.getElementById('me-pass-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const new_password = document.getElementById('me-pass').value;
+  const res = await apiFetch('/api/me/password', { method: 'PUT', body: JSON.stringify({ new_password }) });
+  if (res && res.ok) { toast('Password updated'); document.getElementById('me-pass').value = ''; }
+  else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to update password', 'error');
   }
 });
 
@@ -970,7 +1122,44 @@ async function changeAdminPassword(username) {
 // ══════════════════════════════════════════════════════════════
 //  Settings  (superadmin only)
 // ══════════════════════════════════════════════════════════════
+async function loadAdminGroup() {
+  const res = await apiFetch('/api/admin-group');
+  if (!res) return;
+  const g = await res.json();
+  const el = document.getElementById('admin-group-current');
+  if (g && g.group_id) {
+    el.textContent = `${g.group_name || '(unnamed)'} — ${g.group_id}`;
+    document.getElementById('ag-id').value   = g.group_id;
+    document.getElementById('ag-name').value = g.group_name || '';
+  } else {
+    el.textContent = 'Not set';
+  }
+}
+
+document.getElementById('admin-group-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    group_id:   parseInt(document.getElementById('ag-id').value),
+    group_name: document.getElementById('ag-name').value.trim(),
+  };
+  const res = await apiFetch('/api/admin-group', { method: 'PUT', body: JSON.stringify(body) });
+  if (res && res.ok) { toast('Admin group saved'); loadAdminGroup(); }
+  else toast('Failed to save admin group', 'error');
+});
+
+document.getElementById('ag-clear').addEventListener('click', async () => {
+  if (!confirm('Clear the admin group?')) return;
+  const res = await apiFetch('/api/admin-group', { method: 'DELETE' });
+  if (res && res.ok) {
+    toast('Admin group cleared');
+    document.getElementById('ag-id').value = '';
+    document.getElementById('ag-name').value = '';
+    loadAdminGroup();
+  } else toast('Failed', 'error');
+});
+
 async function loadSettings() {
+  loadAdminGroup();
   const res = await apiFetch('/api/settings');
   if (!res) return;
   const settings = await res.json();

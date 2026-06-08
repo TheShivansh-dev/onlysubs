@@ -1,7 +1,7 @@
 """
 Script to get all chats where bot is admin and their IDs
 """
-from Handlers.subscription import TOKEN
+from Handlers.config import TOKEN
 from telegram import Bot
 import asyncio
 
