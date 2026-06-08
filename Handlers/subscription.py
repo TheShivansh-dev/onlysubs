@@ -184,6 +184,69 @@ async def get_user_id_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     )
 
 
+async def get_details_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /getdetails
+      • private, no args      → your own Telegram ID
+      • group,   no args      → this group's ID
+      • any chat + @username  → that user's Telegram ID
+      • reply + /getdetails   → the replied user's Telegram ID
+    """
+    chat = update.effective_chat
+
+    # 1) Username given → resolve to that user's Telegram ID
+    if context.args:
+        uname = context.args[0].lstrip('@')
+        try:
+            target = await context.bot.get_chat(f"@{uname}")
+            name   = getattr(target, 'full_name', None) or getattr(target, 'title', '') or ''
+            await update.message.reply_text(
+                f"<b>User Details</b>\n\n"
+                f"Username: @{html.escape(uname)}\n"
+                + (f"Name: {html.escape(name)}\n" if name else "")
+                + f"Telegram ID: <code>{target.id}</code>",
+                parse_mode="HTML"
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"Couldn't find <code>@{html.escape(uname)}</code>.\n"
+                "The user needs a public username (and to have interacted with the bot). "
+                "Tip: reply to their message with /getdetails instead.",
+                parse_mode="HTML"
+            )
+        return
+
+    # 2) Reply to someone → that user's Telegram ID
+    if update.message.reply_to_message:
+        u = update.message.reply_to_message.from_user
+        await update.message.reply_text(
+            f"<b>User Details</b>\n\n"
+            f"Name: {html.escape(u.full_name)}\n"
+            f"Username: @{html.escape(u.username or '-')}\n"
+            f"Telegram ID: <code>{u.id}</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    # 3) No args: private → your own ID; group → group ID
+    if chat.type == 'private':
+        u = update.effective_user
+        await update.message.reply_text(
+            f"<b>Your Details</b>\n\n"
+            f"Name: {html.escape(u.full_name)}\n"
+            f"Username: @{html.escape(u.username or '-')}\n"
+            f"Telegram ID: <code>{u.id}</code>",
+            parse_mode="HTML"
+        )
+    else:
+        await update.message.reply_text(
+            f"<b>Group Details</b>\n\n"
+            f"Name: {html.escape(chat.title or '-')}\n"
+            f"Group ID: <code>{chat.id}</code>",
+            parse_mode="HTML"
+        )
+
+
 async def get_chat_info_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     title = chat.title or "Direct Message"

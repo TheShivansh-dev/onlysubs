@@ -6,6 +6,7 @@ from Handlers.subscription import (
     help_command,
     get_user_id_command,
     get_chat_info_command,
+    get_details_command,
     log_user_join,
     check_subscription_expiry,
 )
@@ -24,6 +25,7 @@ def main():
     application.add_handler(CommandHandler('help', help_command))
     application.add_handler(CommandHandler('getuserid', get_user_id_command))
     application.add_handler(CommandHandler('getchatinfo', get_chat_info_command))
+    application.add_handler(CommandHandler('getdetails', get_details_command))
 
     # ── Creator-group backup restore ──
     application.add_handler(CommandHandler('setallfiles', setallfiles_command))
