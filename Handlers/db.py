@@ -715,3 +715,32 @@ def db_set_setting(key: str, value: str):
                 "ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=NOW()",
                 (key, value, value),
             )
+
+
+# ─────────────────────────────────────────────
+#  Audit Logs
+# ─────────────────────────────────────────────
+
+def db_add_log(actor: str, action: str, detail: str = ""):
+    """Best-effort audit log — never raise into the caller."""
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "INSERT INTO audit_logs (actor, action, detail) VALUES (%s, %s, %s)",
+                    (actor or "", action, detail or ""),
+                )
+    except Exception as e:
+        print(f"[LOG] could not write audit log: {e}")
+
+
+def db_get_logs(limit: int = 200) -> list[dict]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, ts, actor, action, detail FROM audit_logs "
+                "ORDER BY id DESC LIMIT %s",
+                (limit,),
+            )
+            rows = cur.fetchall()
+    return [{"id": r[0], "ts": str(r[1]), "actor": r[2], "action": r[3], "detail": r[4]} for r in rows]

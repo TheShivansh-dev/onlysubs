@@ -214,8 +214,10 @@
     <nav>
       <a class="nav-link active" href="#" data-tab="dashboard"><i class="bi bi-speedometer2"></i> Dashboard</a>
       <a class="nav-link" href="#" data-tab="users"><i class="bi bi-people-fill"></i> Users</a>
-      <a class="nav-link manager-only" href="#" data-tab="paid-users" style="display:none"><i class="bi bi-person-check-fill"></i> Paid Users</a>
-      <a class="nav-link manager-only" href="#" data-tab="courses" style="display:none"><i class="bi bi-book-fill"></i> Courses</a>
+      <a class="nav-link" href="#" data-tab="paid-users"><i class="bi bi-person-check-fill"></i> Paid Users</a>
+      <a class="nav-link" href="#" data-tab="courses"><i class="bi bi-book-fill"></i> Courses</a>
+      <a class="nav-link" href="#" data-tab="reminders"><i class="bi bi-send-fill"></i> Reminders</a>
+      <a class="nav-link manager-only" href="#" data-tab="logs"    style="display:none"><i class="bi bi-clock-history"></i> Logs</a>
       <a class="nav-link manager-only" href="#" data-tab="admins"    style="display:none"><i class="bi bi-shield-fill-check"></i> Accounts</a>
       <a class="nav-link manager-only" href="#" data-tab="settings" style="display:none"><i class="bi bi-gear-fill"></i> Settings</a>
       <a class="nav-link" href="#" data-tab="profile"><i class="bi bi-person-circle"></i> Profile</a>
@@ -486,6 +488,81 @@
       </div>
     </div>
 
+    <!-- ── Reminders tab ── -->
+    <div class="tab-pane" id="tab-reminders">
+      <div class="row g-3">
+        <div class="col-lg-7">
+          <div class="section-card">
+            <div class="sc-header flex-wrap gap-2">
+              <h6 class="mb-0"><i class="bi bi-people-fill me-2"></i>Choose Recipients</h6>
+              <div class="d-flex flex-wrap gap-2">
+                <select class="form-select form-select-sm" id="rem-course-filter" style="max-width:160px"><option value="">All courses</option></select>
+                <select class="form-select form-select-sm" id="rem-status-filter" style="max-width:140px">
+                  <option value="">All status</option>
+                  <option value="active">Active</option>
+                  <option value="expiring">Expiring (≤5d)</option>
+                  <option value="expired">Expired/Removed</option>
+                </select>
+                <input type="text" class="form-control form-control-sm search-box" id="rem-search" placeholder="Search…" />
+              </div>
+            </div>
+            <div class="sc-body p-0">
+              <div class="table-responsive" style="max-height:60vh;overflow:auto">
+                <table class="table table-hover mb-0">
+                  <thead>
+                    <tr>
+                      <th style="width:36px"><input type="checkbox" id="rem-select-all" /></th>
+                      <th>Telegram ID</th><th>Username</th><th>Course</th><th>Expires</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rem-tbody"></tbody>
+                </table>
+              </div>
+              <div class="px-3 py-2 small text-muted border-top" id="rem-count">0 selected</div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="section-card">
+            <div class="sc-header"><h6><i class="bi bi-send-fill me-2"></i>Message</h6></div>
+            <div class="sc-body">
+              <form id="rem-send-form">
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Message</label>
+                  <textarea class="form-control form-control-sm" id="rem-message" rows="5" placeholder="Aap ye join kar lijiye…" required></textarea>
+                </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Link <span class="text-muted">(optional)</span></label>
+                  <input type="text" class="form-control form-control-sm" id="rem-link" placeholder="https://t.me/…" />
+                </div>
+                <div class="mb-3">
+                  <label class="form-label small fw-semibold">Button Label</label>
+                  <input type="text" class="form-control form-control-sm" id="rem-btn" placeholder="Open" value="Open" />
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Send to selected</button>
+                <div class="form-text">Sends via the bot. Users who never started the bot can't be reached.</div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Logs tab (managers) ── -->
+    <div class="tab-pane" id="tab-logs">
+      <div class="section-card">
+        <div class="sc-header"><h6><i class="bi bi-clock-history me-2"></i>Activity Logs</h6></div>
+        <div class="sc-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover mb-0">
+              <thead><tr><th>#</th><th>Time</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead>
+              <tbody id="logs-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Settings tab (superadmin only) ── -->
     <div class="tab-pane" id="tab-settings">
       <div class="section-card mb-3">
@@ -656,6 +733,8 @@ const TAB_TITLES = {
   'users':          'All Subscribers',
   'paid-users':     'Paid Users',
   'courses':        'Courses',
+  'reminders':      'Reminders',
+  'logs':           'Activity Logs',
   'admins':         'Accounts',
   'settings':       'Bot Settings',
   'profile':        'My Profile',
@@ -678,6 +757,8 @@ function switchTab(name) {
   if (name === 'users')           loadUsers();
   if (name === 'paid-users')      loadPaidUsers();
   if (name === 'courses')         loadCourses();
+  if (name === 'reminders')       loadReminders();
+  if (name === 'logs')            loadLogs();
   if (name === 'admins')          loadAdmins();
   if (name === 'settings')        loadSettings();
   if (name === 'profile')         loadProfile();
@@ -773,7 +854,7 @@ function renderUsers(users) {
       <td>${dl}</td>
       <td>${statusBadge(!u.isremoved)}</td>
       <td>
-        ${(!u.isremoved && isManager()) ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
+        ${!u.isremoved ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -949,7 +1030,10 @@ async function loadAdmins() {
           <button class="btn btn-outline-secondary btn-sm" onclick="changeAdminPassword('${escHtml(a.username)}')">Set</button>
         </div>
       </td>
-      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button></td>
+      <td>
+        ${getRole() === 'owner' ? `<button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="ownerEditAccount('${escHtml(a.username)}')">Edit</button>` : ''}
+        <button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button>
+      </td>
     </tr>`).join('');
 }
 
@@ -1098,6 +1182,130 @@ async function saveSetting(key) {
   });
   if (res && res.ok) toast(`${key} updated`);
   else toast('Failed to save setting', 'error');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Reminders
+// ══════════════════════════════════════════════════════════════
+let _remUsers = [];
+
+async function loadReminders() {
+  const res = await apiFetch('/api/users');
+  if (!res) return;
+  _remUsers = await res.json();
+  const courses = [...new Set(_remUsers.map(u => u.plan_type).filter(Boolean))].sort();
+  document.getElementById('rem-course-filter').innerHTML =
+    '<option value="">All courses</option>' +
+    courses.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  renderReminderRows();
+}
+
+function _remFiltered() {
+  const q      = document.getElementById('rem-search').value.toLowerCase();
+  const course = document.getElementById('rem-course-filter').value;
+  const status = document.getElementById('rem-status-filter').value;
+  return _remUsers.filter(u => {
+    if (q && !(String(u.userid).includes(q) || String(u.username || '').toLowerCase().includes(q))) return false;
+    if (course && u.plan_type !== course) return false;
+    if (status) {
+      const d = _daysLeft(u.end_date);
+      if (status === 'active'   && (u.isremoved || d === null || d < 0)) return false;
+      if (status === 'expiring' && (u.isremoved || d === null || d < 0 || d > 5)) return false;
+      if (status === 'expired'  && !(u.isremoved || (d !== null && d < 0))) return false;
+    }
+    return true;
+  });
+}
+
+function renderReminderRows() {
+  const tbody = document.getElementById('rem-tbody');
+  const rows = _remFiltered();
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No users</td></tr>'; updateRemCount(); return; }
+  tbody.innerHTML = rows.map(u => `
+    <tr>
+      <td><input type="checkbox" class="rem-cb" value="${u.userid}" /></td>
+      <td><code>${escHtml(u.userid)}</code></td>
+      <td>${escHtml(u.username || '–')}</td>
+      <td>${escHtml(u.plan_type || '–')}</td>
+      <td>${escHtml(u.end_date || '–')}</td>
+    </tr>`).join('');
+  document.querySelectorAll('.rem-cb').forEach(cb => cb.addEventListener('change', updateRemCount));
+  document.getElementById('rem-select-all').checked = false;
+  updateRemCount();
+}
+
+function updateRemCount() {
+  const n = document.querySelectorAll('.rem-cb:checked').length;
+  document.getElementById('rem-count').textContent = `${n} selected`;
+}
+
+['rem-search', 'rem-course-filter', 'rem-status-filter'].forEach(id => {
+  document.getElementById(id).addEventListener('input', renderReminderRows);
+});
+document.getElementById('rem-select-all').addEventListener('change', e => {
+  document.querySelectorAll('.rem-cb').forEach(cb => { cb.checked = e.target.checked; });
+  updateRemCount();
+});
+
+document.getElementById('rem-send-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const ids = [...document.querySelectorAll('.rem-cb:checked')].map(cb => parseInt(cb.value));
+  if (!ids.length) { toast('Select at least one user', 'error'); return; }
+  const body = {
+    user_ids: ids,
+    message: document.getElementById('rem-message').value,
+    link: document.getElementById('rem-link').value.trim(),
+    button_label: document.getElementById('rem-btn').value.trim() || 'Open',
+  };
+  const res = await apiFetch('/api/reminders/send', { method: 'POST', body: JSON.stringify(body) });
+  if (res && res.ok) {
+    const d = await res.json();
+    toast(`Sent ${d.sent}, failed ${d.failed}`);
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to send', 'error');
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  Logs
+// ══════════════════════════════════════════════════════════════
+async function loadLogs() {
+  const res = await apiFetch('/api/logs');
+  if (!res) return;
+  const logs = await res.json();
+  const tbody = document.getElementById('logs-tbody');
+  if (!logs.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No logs</td></tr>'; return; }
+  tbody.innerHTML = logs.map((l, i) => `
+    <tr>
+      <td class="text-muted">${i + 1}</td>
+      <td class="small text-muted">${escHtml((l.ts || '').slice(0, 19))}</td>
+      <td>${escHtml(l.actor || '–')}</td>
+      <td><span class="badge bg-light text-dark border">${escHtml(l.action || '')}</span></td>
+      <td class="small">${escHtml(l.detail || '')}</td>
+    </tr>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  Owner-only account edit
+// ══════════════════════════════════════════════════════════════
+async function ownerEditAccount(username) {
+  const newEmail = prompt(`New email for ${username} (blank = keep):`, username);
+  if (newEmail === null) return;
+  const newRole = prompt('New role (admin / superadmin, blank = keep):', '');
+  if (newRole === null) return;
+  const newPass = prompt('New password (min 6, blank = keep):', '');
+  if (newPass === null) return;
+  const body = {};
+  if (newEmail.trim() && newEmail.trim() !== username) body.email = newEmail.trim();
+  if (newRole.trim()) body.role = newRole.trim();
+  if (newPass.trim()) body.new_password = newPass.trim();
+  if (!Object.keys(body).length) { toast('Nothing changed'); return; }
+  const res = await apiFetch(`/api/owner/accounts/${encodeURIComponent(username)}`, {
+    method: 'PUT', body: JSON.stringify(body),
+  });
+  if (res && res.ok) { toast('Account updated'); loadAdmins(); }
+  else { const d = res ? await res.json().catch(() => ({})) : {}; toast(d.detail || 'Failed', 'error'); }
 }
 
 // ══════════════════════════════════════════════════════════════

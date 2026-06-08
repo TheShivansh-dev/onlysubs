@@ -45,6 +45,8 @@ from Handlers.db import (
     db_get_current_admin_group,
     db_set_admin_group,
     db_remove_admin_group,
+    db_add_log,
+    db_get_logs,
 )
 from Handlers.config import make_course_code
 
@@ -185,6 +187,7 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
             detail="Incorrect username or password",
         )
     token = _create_token(form.username, user["role"])
+    db_add_log(form.username, "login", user["role"])
     return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
 
@@ -210,17 +213,19 @@ class CourseBody(BaseModel):
 
 
 @app.post("/api/courses", status_code=201)
-def add_course(body: CourseBody, current_user: dict = Depends(_require_manager)):
+def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)):
     name = body.course_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="course_name is required")
     db_save_course(name, make_course_code(name), (body.group_link or "").strip(), body.group_id)
+    db_add_log(current_user["username"], "course_add", name)
     return {"ok": True, "course_code": make_course_code(name)}
 
 
 @app.delete("/api/courses/{course_id}")
-def delete_course(course_id: int, current_user: dict = Depends(_require_manager)):
+def delete_course(course_id: int, current_user: dict = Depends(_get_current_user)):
     db_delete_course(course_id)
+    db_add_log(current_user["username"], "course_delete", f"id={course_id}")
     return {"ok": True}
 
 
@@ -238,9 +243,10 @@ def list_users(current_user: dict = Depends(_get_current_user)):
 
 
 @app.delete("/api/users/{user_id}")
-def remove_user(user_id: int, current_user: dict = Depends(_require_manager)):
+def remove_user(user_id: int, current_user: dict = Depends(_get_current_user)):
     today = str(datetime.utcnow().date())
     db_remove_registered_user(user_id, today)
+    db_add_log(current_user["username"], "user_remove", f"userid={user_id}")
     return {"ok": True}
 
 
@@ -266,7 +272,7 @@ class PaidUserBody(BaseModel):
 
 
 @app.post("/api/paid-users", status_code=201)
-def add_paid_user(body: PaidUserBody, current_user: dict = Depends(_require_manager)):
+def add_paid_user(body: PaidUserBody, current_user: dict = Depends(_get_current_user)):
     if body.months < 1:
         raise HTTPException(status_code=400, detail="months must be >= 1")
     course_name = body.course.strip()
@@ -288,12 +294,14 @@ def add_paid_user(body: PaidUserBody, current_user: dict = Depends(_require_mana
         str(today),
         str(end_date),
     )
+    db_add_log(current_user["username"], "paid_user_add", f"userid={body.user_id} course={course_name} months={body.months}")
     return {"ok": True, "end_date": str(end_date)}
 
 
 @app.delete("/api/paid-users/{user_id}")
-def remove_paid_user(user_id: int, current_user: dict = Depends(_require_manager)):
+def remove_paid_user(user_id: int, current_user: dict = Depends(_get_current_user)):
     db_remove_paid_user(user_id)
+    db_add_log(current_user["username"], "paid_user_remove", f"userid={user_id}")
     return {"ok": True}
 
 
@@ -304,8 +312,9 @@ class EditPaidUserBody(BaseModel):
 
 
 @app.put("/api/paid-users/{user_id}")
-def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = Depends(_require_manager)):
+def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = Depends(_get_current_user)):
     db_edit_paid_user(user_id, body.course, body.start_date, body.end_date)
+    db_add_log(current_user["username"], "paid_user_edit", f"userid={user_id}")
     return {"ok": True}
 
 
@@ -325,12 +334,14 @@ class AdminGroupBody(BaseModel):
 @app.put("/api/admin-group")
 def set_admin_group(body: AdminGroupBody, sa: dict = Depends(_require_manager)):
     db_set_admin_group(body.group_id, (body.group_name or "").strip())
+    db_add_log(sa["username"], "admin_group_set", str(body.group_id))
     return {"ok": True}
 
 
 @app.delete("/api/admin-group")
 def clear_admin_group(sa: dict = Depends(_require_manager)):
     removed = db_remove_admin_group()
+    db_add_log(sa["username"], "admin_group_clear", "")
     return {"ok": True, "removed": removed}
 
 
@@ -373,6 +384,7 @@ def add_admin(body: AddAdminBody, sa: dict = Depends(_require_manager)):
     if db_get_admin_user(username):
         raise HTTPException(400, "An account with this email already exists")
     db_create_admin_user(username, hash_password(body.password), role=body.role, tg_id=body.tg_id)
+    db_add_log(sa["username"], "account_add", f"{username} ({body.role})")
     return {"ok": True}
 
 
@@ -394,6 +406,7 @@ def remove_admin(username: str, sa: dict = Depends(_require_manager)):
     removed = db_remove_admin_user(username)
     if not removed:
         raise HTTPException(404, "Account not found or is the owner")
+    db_add_log(sa["username"], "account_remove", username)
     return {"ok": True}
 
 
@@ -408,7 +421,50 @@ def change_password(username: str, body: ChangePasswordBody,
     if not body.new_password or len(body.new_password) < 6:
         raise HTTPException(400, "Password must be at least 6 characters")
     db_change_admin_password(username, hash_password(body.new_password))
+    db_add_log(sa["username"], "account_password_reset", username)
     return {"ok": True}
+
+
+# ── Owner-only account editing (email / role) ─────────────────────────────────
+#  Everything except the Telegram id and joined date may be changed here.
+
+class OwnerEditAccountBody(BaseModel):
+    email: Optional[str] = None
+    role: Optional[str] = None
+    new_password: Optional[str] = None
+
+
+@app.put("/api/owner/accounts/{username}")
+def owner_edit_account(username: str, body: OwnerEditAccountBody,
+                       owner: dict = Depends(_require_owner)):
+    target = db_get_admin_user(username)
+    if not target:
+        raise HTTPException(404, "Account not found")
+    if target["role"] == "owner":
+        raise HTTPException(403, "The owner account cannot be edited here")
+
+    changes = []
+    if body.role and body.role in ("admin", "superadmin") and body.role != target["role"]:
+        db_set_admin_role(username, body.role)
+        changes.append(f"role={body.role}")
+    if body.new_password:
+        if len(body.new_password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+        db_change_admin_password(username, hash_password(body.new_password))
+        changes.append("password")
+    final_name = username
+    if body.email and body.email.strip() and body.email.strip() != username:
+        new_email = body.email.strip()
+        if "@" not in new_email:
+            raise HTTPException(400, "A valid email is required")
+        ok = db_update_admin_username(username, new_email)
+        if not ok:
+            raise HTTPException(400, "That email is already in use")
+        final_name = new_email
+        changes.append(f"email={new_email}")
+
+    db_add_log(owner["username"], "account_edit", f"{username} -> {', '.join(changes) or 'no change'}")
+    return {"ok": True, "username": final_name}
 
 
 # ── Self profile  (any logged-in account) ─────────────────────────────────────
@@ -472,4 +528,51 @@ def update_setting(key: str, body: SettingBody, sa: dict = Depends(_require_mana
     if key in _HIDDEN_SETTINGS:
         raise HTTPException(403, "This setting cannot be changed from the panel")
     db_set_setting(key, body.value.strip())
+    db_add_log(sa["username"], "setting_update", f"{key}={body.value.strip()}")
     return {"ok": True}
+
+
+# ── Manual reminders  (any logged-in account) ─────────────────────────────────
+#  Sends a custom message (+ optional link button) to selected subscribers via
+#  the bot running in this process.
+
+class ReminderBody(BaseModel):
+    user_ids: list[int]
+    message: str
+    link: Optional[str] = ""
+    button_label: Optional[str] = "Open"
+
+
+@app.post("/api/reminders/send")
+async def send_reminders(body: ReminderBody, current: dict = Depends(_get_current_user)):
+    if _bot_app is None:
+        raise HTTPException(503, "Bot is not running in this process (set RUN_BOT=1).")
+    if not body.user_ids:
+        raise HTTPException(400, "Select at least one user")
+    if not body.message.strip():
+        raise HTTPException(400, "Message is required")
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    kb = None
+    if (body.link or "").strip():
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            (body.button_label or "Open").strip() or "Open", url=body.link.strip())]])
+
+    sent = failed = 0
+    for uid in body.user_ids:
+        try:
+            await _bot_app.bot.send_message(chat_id=uid, text=body.message, reply_markup=kb)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            print(f"[REMINDER] failed for {uid}: {e}")
+
+    db_add_log(current["username"], "reminder_send", f"sent={sent} failed={failed}")
+    return {"sent": sent, "failed": failed}
+
+
+# ── Audit logs  (managers) ────────────────────────────────────────────────────
+
+@app.get("/api/logs")
+def get_logs(sa: dict = Depends(_require_manager)):
+    return db_get_logs(300)

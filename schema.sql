@@ -120,6 +120,14 @@ CREATE TABLE IF NOT EXISTS invite_links (
     is_revoked   SMALLINT DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id      SERIAL PRIMARY KEY,
+    ts      TIMESTAMPTZ DEFAULT NOW(),
+    actor   VARCHAR(200),
+    action  VARCHAR(100),
+    detail  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS bot_settings (
     key        VARCHAR(100) PRIMARY KEY,
     value      TEXT,
