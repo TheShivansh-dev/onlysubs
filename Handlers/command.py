@@ -3,20 +3,16 @@ from telegram.ext import   ContextTypes
 import os
 import json
 import pandas as pd
-from typing import Final
 import asyncio,re
+from .config import BOT_USERNAME
 
-
-TOKEN: Final = '8613978044:AAFccWbuIxyBLgi4zduV1rE5MnqBBpLj6PM'
-#TOKEN: Final = '8357857623:AAH8uwRGnKmnaaH-RipXiCP5BPyE_bSKor4'   #testing bot
-BOT_USERNAME: Final = '@spoken_helper_bot'
 
 ALLOWED_GROUP_IDS = [-1001817635995, -1002114430690,-1001817635995]
 groupsendid = -1002114430690
 botManagementGroupId =  -1002359766306
 CHANNEL_ID = "-1002234035497"
 registered_groups = set()
-broadcast_url = "https://t.me/spoken_helper_bot?start=start"
+broadcast_url = f"https://t.me/{BOT_USERNAME.lstrip('@')}?start=start"
 RegisteredGroupfile = "UserScore/RegisteredGroups.xlsx"
 translation_excel_path = "UserScore/.xlsx"
 GROUPS_FILE = "groups.json"
@@ -107,6 +103,13 @@ async def forceregister(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text("Error while force registering the group.")
        
+async def start_Command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    text = (
+        "👋 Welcome to the Approval Bot!\n\n"
+    )
+    await context.bot.send_message(chat_id, text=text, parse_mode="Markdown")
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     text = (
