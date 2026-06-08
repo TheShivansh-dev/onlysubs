@@ -450,6 +450,33 @@ def db_extend_registered_user(user_id: int, new_end_date: str):
             )
 
 
+def db_set_registered_invite_link(user_id: int, url: str):
+    """Persist the single invite link issued for this user's active subscription.
+
+    The deep link mints a member_limit=1 link only ONCE; every re-click reuses
+    this stored value, so a UniqueId can never be used to generate extra links
+    to share around. Returns nothing.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE registered_users SET invite_link_url=%s "
+                "WHERE userid=%s AND isremoved=0",
+                (url, user_id),
+            )
+
+
+def db_edit_registered_user(user_id: int, username: str, plan_type: str, end_date: str):
+    """Edit an active registered user's editable fields (not tg id / join date)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE registered_users SET username=%s, plan_type=%s, end_date=%s "
+                "WHERE userid=%s AND isremoved=0",
+                (username, plan_type, end_date, user_id),
+            )
+
+
 def db_get_user_by_userid(user_id: int) -> Optional[dict]:
     """Return the most recent active registered_user row for this user_id, or None."""
     cols = ["id", "userid", "username", "end_date", "plan_type", "isremoved",

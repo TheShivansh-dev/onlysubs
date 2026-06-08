@@ -13,6 +13,7 @@ from .config import (
 from .db import (
     db_save_registered_user,
     db_save_invite_link,
+    db_set_registered_invite_link,
     db_get_active_registered_users,
     db_get_user_by_userid,
     db_get_all_paid_users,
@@ -66,10 +67,42 @@ async def _make_one_time_invite(context: ContextTypes.DEFAULT_TYPE,
     return course.get('group_link') or None
 
 
+async def _is_group_member(context: ContextTypes.DEFAULT_TYPE,
+                           group_id, user_id: int) -> bool:
+    """True if the user is already inside the course group."""
+    if not group_id:
+        return False
+    try:
+        m = await context.bot.get_chat_member(int(group_id), user_id)
+        return m.status in ("member", "administrator", "creator", "owner")
+    except Exception:
+        return False
+
+
+async def _get_or_create_invite(context: ContextTypes.DEFAULT_TYPE,
+                                course: dict, user_id: int) -> str | None:
+    """
+    Return THIS user's invite link, reusing the one already issued for them.
+    A new member_limit=1 link is minted only if none was stored yet — so
+    re-clicking the deep link never produces extra links that could be shared.
+    """
+    row = db_get_user_by_userid(user_id)
+    stored = (row.get('invite_link_url') or '').strip() if row else ''
+    if stored:
+        return stored
+    invite = await _make_one_time_invite(context, course, user_id)
+    if invite:
+        try:
+            db_set_registered_invite_link(user_id, invite)
+        except Exception as e:
+            log(f"[LINK] could not persist invite link: {e}")
+    return invite
+
+
 async def _send_access(context: ContextTypes.DEFAULT_TYPE, update: Update,
                        course: dict, months: int, end_date):
-    """Send a one-time group invite link + support contact to the user."""
-    invite = await _make_one_time_invite(context, course, update.effective_user.id)
+    """Send the user's single group invite link + support contact."""
+    invite = await _get_or_create_invite(context, course, update.effective_user.id)
     msg    = get_display_message(course['course_name'], months, end_date)
     if invite:
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Join Group", url=invite)]])
@@ -120,7 +153,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if claimed and claimed.get('claimed_userid') is not None:
         if claimed['claimed_userid'] == user_id:
-            # Same user, same link → re-issue the group entry link.
+            # Same user, same link.
+            # If they're already inside the group, don't hand out any link.
+            if await _is_group_member(context, course.get('group_id'), user_id):
+                await update.message.reply_text(
+                    "<b>You already have access ✅</b>\n\n"
+                    "You're already a member of this group.\n\n"
+                    f"Trouble? Contact {get_support_contact()}",
+                    parse_mode="HTML"
+                )
+                return
+            # Not a member yet → give back the SAME link issued earlier
+            # (never a fresh one — that's what allowed the leak).
             row = db_get_user_by_userid(user_id)
             end_date = row['end_date'] if row else _today_plus(months)
             await _send_access(context, update, course, months, end_date)

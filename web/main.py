@@ -36,6 +36,7 @@ from Handlers.db import (
     db_delete_course,
     db_get_all_registered_users,
     db_remove_registered_user,
+    db_edit_registered_user,
     db_get_all_paid_users,
     db_add_paid_user,
     db_remove_paid_user,
@@ -247,6 +248,20 @@ def remove_user(user_id: int, current_user: dict = Depends(_get_current_user)):
     today = str(datetime.utcnow().date())
     db_remove_registered_user(user_id, today)
     db_add_log(current_user["username"], "user_remove", f"userid={user_id}")
+    return {"ok": True}
+
+
+class EditUserBody(BaseModel):
+    username: Optional[str] = ""
+    plan_type: str                   # course name
+    end_date: str                    # YYYY-MM-DD
+
+
+@app.put("/api/users/{user_id}")
+def edit_user(user_id: int, body: EditUserBody, current_user: dict = Depends(_get_current_user)):
+    db_edit_registered_user(user_id, (body.username or "").strip(),
+                            body.plan_type.strip(), body.end_date.strip())
+    db_add_log(current_user["username"], "user_edit", f"userid={user_id}")
     return {"ok": True}
 
 

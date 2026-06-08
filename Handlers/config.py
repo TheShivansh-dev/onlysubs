@@ -103,6 +103,9 @@ def parse_start_param(raw: str) -> Optional[tuple[str, str, int]]:
     course_code = '_'.join(parts[1:-1])   # course codes never contain '_', but be safe
     if not unique_id or not course_code or not months_str.isdigit():
         return None
+    # UniqueId must be exactly 8 characters — no more, no less.
+    if len(unique_id) != 8:
+        return None
     months = int(months_str)
     if months < 1:
         return None

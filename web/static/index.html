@@ -606,6 +606,87 @@
   </main>
 </div>
 
+<!-- Edit Subscriber modal -->
+<div class="modal fade" id="editUserModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="edit-user-form">
+        <div class="modal-header">
+          <h6 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Edit Subscriber</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="eu-userid" />
+          <div class="row g-3">
+            <div class="col-6">
+              <label class="form-label small text-muted">Telegram ID</label>
+              <input type="text" class="form-control form-control-sm" id="eu-userid-display" disabled />
+            </div>
+            <div class="col-6">
+              <label class="form-label small text-muted">Joined</label>
+              <input type="text" class="form-control form-control-sm" id="eu-joined" disabled />
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Username</label>
+              <input type="text" class="form-control form-control-sm" id="eu-username" placeholder="username" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Course</label>
+              <select class="form-select form-select-sm" id="eu-course"></select>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Expires</label>
+              <input type="date" class="form-control form-control-sm" id="eu-expires" required />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Account (owner) modal -->
+<div class="modal fade" id="editAccountModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="edit-account-form">
+        <div class="modal-header">
+          <h6 class="modal-title"><i class="bi bi-person-gear me-2"></i>Edit Account</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="ea-username-orig" />
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label small">Email</label>
+              <input type="email" class="form-control form-control-sm" id="ea-email" required />
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Role</label>
+              <select class="form-select form-select-sm" id="ea-role">
+                <option value="admin">admin</option>
+                <option value="superadmin">superadmin</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">New password <span class="text-muted">(blank = keep)</span></label>
+              <input type="text" class="form-control form-control-sm" id="ea-password" placeholder="min 6 chars" />
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
@@ -860,7 +941,9 @@ function renderUsers(users) {
       <td>${dl}</td>
       <td>${statusBadge(!u.isremoved)}</td>
       <td>
-        ${!u.isremoved ? `<button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
+        ${!u.isremoved ? `
+          <button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="openEditUser(${u.userid})">Edit</button>
+          <button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -877,6 +960,46 @@ async function removeUser(userId) {
   if (res && res.ok) { toast('User removed'); loadUsers(); }
   else toast('Failed to remove user', 'error');
 }
+
+async function openEditUser(userId) {
+  const u = _allUsers.find(x => String(x.userid) === String(userId));
+  if (!u) return;
+  // Make sure we have the course list for the dropdown
+  if (!_coursesCache.length) {
+    const r = await apiFetch('/api/courses');
+    if (r) _coursesCache = await r.json();
+  }
+  const cur = u.plan_type || '';
+  const opts = _coursesCache.map(c => c.course_name);
+  if (cur && !opts.includes(cur)) opts.unshift(cur);
+  document.getElementById('eu-userid').value         = u.userid;
+  document.getElementById('eu-userid-display').value = u.userid;
+  document.getElementById('eu-joined').value         = u.registration_date || '–';
+  document.getElementById('eu-username').value       = u.username || '';
+  document.getElementById('eu-course').innerHTML =
+    opts.map(n => `<option value="${escHtml(n)}"${n === cur ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
+  document.getElementById('eu-expires').value        = u.end_date || '';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editUserModal')).show();
+}
+
+document.getElementById('edit-user-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const userId = document.getElementById('eu-userid').value;
+  const body = {
+    username:  document.getElementById('eu-username').value.trim(),
+    plan_type: document.getElementById('eu-course').value,
+    end_date:  document.getElementById('eu-expires').value,
+  };
+  const res = await apiFetch(`/api/users/${userId}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (res && res.ok) {
+    toast('Subscriber updated');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editUserModal')).hide();
+    loadUsers();
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to update', 'error');
+  }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  Paid Users
@@ -1016,11 +1139,14 @@ function _populateRoleOptions() {
   sel.innerHTML = opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 }
 
+let _adminsCache = [];
+
 async function loadAdmins() {
   _populateRoleOptions();
   const res = await apiFetch('/api/admins');
   if (!res) return;
   const admins = await res.json();
+  _adminsCache = admins;
   const tbody = document.getElementById('admins-tbody');
   if (!admins.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No accounts</td></tr>'; return; }
   tbody.innerHTML = admins.map((a, i) => `
@@ -1295,24 +1421,37 @@ async function loadLogs() {
 // ══════════════════════════════════════════════════════════════
 //  Owner-only account edit
 // ══════════════════════════════════════════════════════════════
-async function ownerEditAccount(username) {
-  const newEmail = prompt(`New email for ${username} (blank = keep):`, username);
-  if (newEmail === null) return;
-  const newRole = prompt('New role (admin / superadmin, blank = keep):', '');
-  if (newRole === null) return;
-  const newPass = prompt('New password (min 6, blank = keep):', '');
-  if (newPass === null) return;
+function ownerEditAccount(username) {
+  const a = _adminsCache.find(x => x.username === username);
+  document.getElementById('ea-username-orig').value = username;
+  document.getElementById('ea-email').value = username;   // username is the login email
+  document.getElementById('ea-role').value  = (a && a.role) || 'admin';
+  document.getElementById('ea-password').value = '';
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editAccountModal')).show();
+}
+
+document.getElementById('edit-account-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const orig    = document.getElementById('ea-username-orig').value;
+  const email   = document.getElementById('ea-email').value.trim();
+  const role    = document.getElementById('ea-role').value;
+  const newPass = document.getElementById('ea-password').value.trim();
   const body = {};
-  if (newEmail.trim() && newEmail.trim() !== username) body.email = newEmail.trim();
-  if (newRole.trim()) body.role = newRole.trim();
-  if (newPass.trim()) body.new_password = newPass.trim();
-  if (!Object.keys(body).length) { toast('Nothing changed'); return; }
-  const res = await apiFetch(`/api/owner/accounts/${encodeURIComponent(username)}`, {
+  if (email && email !== orig) body.email = email;
+  body.role = role;                          // always send chosen role
+  if (newPass) body.new_password = newPass;
+  const res = await apiFetch(`/api/owner/accounts/${encodeURIComponent(orig)}`, {
     method: 'PUT', body: JSON.stringify(body),
   });
-  if (res && res.ok) { toast('Account updated'); loadAdmins(); }
-  else { const d = res ? await res.json().catch(() => ({})) : {}; toast(d.detail || 'Failed', 'error'); }
-}
+  if (res && res.ok) {
+    toast('Account updated');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editAccountModal')).hide();
+    loadAdmins();
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed', 'error');
+  }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  Bootstrap
