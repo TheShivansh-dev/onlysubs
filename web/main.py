@@ -39,7 +39,6 @@ from Handlers.db import (
     db_add_paid_user,
     db_remove_paid_user,
     db_edit_paid_user,
-    db_get_all_groups,
     db_get_all_settings,
     db_set_setting,
     db_get_current_admin_group,
@@ -303,18 +302,6 @@ def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = De
     return {"ok": True}
 
 
-# ── Groups ────────────────────────────────────────────────────────────────────
-
-@app.get("/api/groups")
-def list_groups(current_user: dict = Depends(_get_current_user)):
-    groups = db_get_all_groups()
-    for g in groups:
-        for k, v in g.items():
-            if hasattr(v, "isoformat"):
-                g[k] = v.isoformat()
-    return groups
-
-
 # ── Admin Group  (SuperAdmin only) ────────────────────────────────────────────
 
 @app.get("/api/admin-group")
@@ -338,18 +325,6 @@ def set_admin_group(body: AdminGroupBody, sa: dict = Depends(_require_manager)):
 def clear_admin_group(sa: dict = Depends(_require_manager)):
     removed = db_remove_admin_group()
     return {"ok": True, "removed": removed}
-
-
-# ── Pending Invites ───────────────────────────────────────────────────────────
-
-@app.get("/api/pending-invites")
-def list_pending_invites(current_user: dict = Depends(_get_current_user)):
-    invites = db_get_all_pending_invites()
-    for inv in invites:
-        for k, v in inv.items():
-            if hasattr(v, "isoformat"):
-                inv[k] = v.isoformat()
-    return invites
 
 
 # ── Account Management ────────────────────────────────────────────────────────

@@ -216,8 +216,6 @@
       <a class="nav-link" href="#" data-tab="users"><i class="bi bi-people-fill"></i> Users</a>
       <a class="nav-link manager-only" href="#" data-tab="paid-users" style="display:none"><i class="bi bi-person-check-fill"></i> Paid Users</a>
       <a class="nav-link manager-only" href="#" data-tab="courses" style="display:none"><i class="bi bi-book-fill"></i> Courses</a>
-      <a class="nav-link manager-only" href="#" data-tab="groups" style="display:none"><i class="bi bi-collection-fill"></i> Groups</a>
-      <a class="nav-link manager-only" href="#" data-tab="pending-invites" style="display:none"><i class="bi bi-envelope-fill"></i> Pending Invites</a>
       <a class="nav-link manager-only" href="#" data-tab="admins"    style="display:none"><i class="bi bi-shield-fill-check"></i> Accounts</a>
       <a class="nav-link manager-only" href="#" data-tab="settings" style="display:none"><i class="bi bi-gear-fill"></i> Settings</a>
       <a class="nav-link" href="#" data-tab="profile"><i class="bi bi-person-circle"></i> Profile</a>
@@ -413,40 +411,6 @@
       </div>
     </div>
 
-    <!-- ── Groups ── -->
-    <div class="tab-pane" id="tab-groups">
-      <div class="section-card">
-        <div class="sc-header"><h6><i class="bi bi-collection-fill me-2"></i>Groups (read-only)</h6></div>
-        <div class="sc-body p-0">
-          <div class="table-responsive">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr><th>#</th><th>Group ID</th><th>Group Name</th><th>Type</th><th>Course</th><th>Added</th><th>Active</th></tr>
-              </thead>
-              <tbody id="groups-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-
-    <!-- ── Pending Invites ── -->
-    <div class="tab-pane" id="tab-pending-invites">
-      <div class="section-card">
-        <div class="sc-header"><h6><i class="bi bi-envelope-fill me-2"></i>Pending Invites</h6></div>
-        <div class="sc-body p-0">
-          <div class="table-responsive">
-            <table class="table table-hover mb-0">
-              <thead>
-                <tr><th>#</th><th>Course</th><th>Months</th><th>Start</th><th>End</th><th>Created</th><th>Status</th></tr>
-              </thead>
-              <tbody id="invites-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <!-- ── Accounts tab (owner + superadmin) ── -->
     <div class="tab-pane" id="tab-admins">
@@ -690,8 +654,6 @@ const TAB_TITLES = {
   'users':          'All Subscribers',
   'paid-users':     'Paid Users',
   'courses':        'Courses',
-  'groups':         'Groups',
-  'pending-invites':'Pending Invites',
   'admins':         'Accounts',
   'settings':       'Bot Settings',
   'profile':        'My Profile',
@@ -714,8 +676,6 @@ function switchTab(name) {
   if (name === 'users')           loadUsers();
   if (name === 'paid-users')      loadPaidUsers();
   if (name === 'courses')         loadCourses();
-  if (name === 'groups')          loadGroups();
-  if (name === 'pending-invites') loadPendingInvites();
   if (name === 'admins')          loadAdmins();
   if (name === 'settings')        loadSettings();
   if (name === 'profile')         loadProfile();
@@ -929,55 +889,6 @@ async function deleteCourse(id) {
   const res = await apiFetch(`/api/courses/${id}`, { method: 'DELETE' });
   if (res && res.ok) { toast('Course deleted'); loadCourses(); }
   else toast('Failed', 'error');
-}
-
-// ══════════════════════════════════════════════════════════════
-//  Groups
-// ══════════════════════════════════════════════════════════════
-async function loadGroups() {
-  const res = await apiFetch('/api/groups');
-  if (!res) return;
-  const groups = await res.json();
-  const tbody = document.getElementById('groups-tbody');
-  if (!groups.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No groups configured</td></tr>'; return; }
-  tbody.innerHTML = groups.map((g, i) => `
-    <tr>
-      <td class="text-muted">${i + 1}</td>
-      <td><code>${escHtml(g.group_id)}</code></td>
-      <td>${escHtml(g.group_name || '–')}</td>
-      <td><span class="badge bg-secondary">${escHtml(g.type)}</span></td>
-      <td>${escHtml(g.course_name || '–')}</td>
-      <td>${escHtml(g.added_date || '–')}</td>
-      <td>${statusBadge(g.is_active)}</td>
-    </tr>`).join('');
-}
-
-// ══════════════════════════════════════════════════════════════
-//  GUIDs
-// ══════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════
-//  Pending Invites
-// ══════════════════════════════════════════════════════════════
-async function loadPendingInvites() {
-  const res = await apiFetch('/api/pending-invites');
-  if (!res) return;
-  const invites = await res.json();
-  const tbody = document.getElementById('invites-tbody');
-  if (!invites.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-3">No pending invites</td></tr>'; return; }
-  tbody.innerHTML = invites.map((inv, i) => `
-    <tr>
-      <td class="text-muted">${i + 1}</td>
-      <td>${escHtml(inv.course_name || '–')}</td>
-      <td>${escHtml(inv.months)}</td>
-      <td>${escHtml(inv.start_date || '–')}</td>
-      <td>${escHtml(inv.end_date || '–')}</td>
-      <td>${escHtml(inv.created_date || '–')}</td>
-      <td>${inv.is_used
-        ? '<span class="badge-used">Used</span>'
-        : '<span class="badge-active">Pending</span>'
-      }</td>
-    </tr>`).join('');
 }
 
 // ══════════════════════════════════════════════════════════════
