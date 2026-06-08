@@ -68,8 +68,12 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 app = FastAPI(title="OnlySubscriber Admin", docs_url=None, redoc_url=None)
 
 
+# Holds the running Telegram bot when RUN_BOT is enabled (single-service mode).
+_bot_app = None
+
+
 @app.on_event("startup")
-def startup():
+async def startup():
     init_schema()
     # Seed the owner account from env, only if both vars are set.
     if OWNER_EMAIL and OWNER_PASSWORD:
@@ -81,6 +85,33 @@ def startup():
             db_set_admin_role(OWNER_EMAIL, "owner")
     else:
         print("[STARTUP] OWNER_EMAIL / OWNER_PASSWORD not set — owner account not seeded.")
+
+    # Run the Telegram bot inside this web process (free single-service mode).
+    # Disable by setting RUN_BOT=0 when the bot runs as its own worker.
+    if os.environ.get("RUN_BOT", "1") != "0":
+        global _bot_app
+        try:
+            from bot import build_application, ALLOWED_UPDATES
+            _bot_app = build_application()
+            await _bot_app.initialize()
+            await _bot_app.start()
+            await _bot_app.updater.start_polling(allowed_updates=ALLOWED_UPDATES)
+            print("[STARTUP] Telegram bot polling started (single-service mode).")
+        except Exception as e:
+            print(f"[STARTUP] Could not start Telegram bot: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global _bot_app
+    if _bot_app is not None:
+        try:
+            await _bot_app.updater.stop()
+            await _bot_app.stop()
+            await _bot_app.shutdown()
+        except Exception as e:
+            print(f"[SHUTDOWN] Error stopping bot: {e}")
+        _bot_app = None
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────────────

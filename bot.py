@@ -15,9 +15,15 @@ from Handlers.backup import backup_data_files, setallfiles_command
 from pytz import timezone
 import datetime
 
+ALLOWED_UPDATES = ["message", "callback_query", "chat_member"]
 
-def main():
-    init_schema()
+
+def build_application() -> Application:
+    """Build and configure the Telegram Application (handlers + jobs).
+
+    Reusable so the bot can run either standalone (run_polling) or inside the
+    web service's event loop (initialize/start/updater.start_polling).
+    """
     application = Application.builder().token(TOKEN).build()
 
     # ── Public commands ──
@@ -46,7 +52,13 @@ def main():
     # ── Data backup every 30 minutes ──
     application.job_queue.run_repeating(backup_data_files, interval=1800, first=60)
 
-    application.run_polling(allowed_updates=["message", "callback_query", "chat_member"])
+    return application
+
+
+def main():
+    init_schema()
+    application = build_application()
+    application.run_polling(allowed_updates=ALLOWED_UPDATES)
 
 
 if __name__ == "__main__":

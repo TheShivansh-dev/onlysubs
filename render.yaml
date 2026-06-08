@@ -1,5 +1,6 @@
 services:
-  # ── Web admin panel ──────────────────────────────────────────────────────────
+  # ── Web admin panel + Telegram bot (single free service) ─────────────────────
+  #  The web process also runs the bot via polling on startup (RUN_BOT!=0).
   - type: web
     name: onlysub-admin
     runtime: python
@@ -15,16 +16,9 @@ services:
       - key: OWNER_PASSWORD
         sync: false          # owner login password
       - key: BOT_TOKEN
-        sync: false
-
-  # ── Telegram bot worker ───────────────────────────────────────────────────────
-  - type: worker
-    name: onlysub-bot
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: BOT_TOKEN
-        sync: false
+        sync: false          # your bot token (BotFather)
+      - key: BOT_USERNAME
+        sync: false          # your bot @username (for deep links)
+      - key: BOT_CREATOR_GROUP_ID
+        sync: false          # optional — group that receives auto-backups
+      # Set RUN_BOT=0 only if you run the bot as a separate worker instead.
