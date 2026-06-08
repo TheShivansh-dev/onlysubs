@@ -24,10 +24,15 @@ def _env_int(name: str, default: int) -> int:
     except ValueError:
         return default
 
-ADMIN_GROUP_ID:       Final = _env_int("ADMIN_GROUP_ID", -12342343214)
-ADMIN_USER_ID:        Final = _env_int("ADMIN_USER_ID", 8502504224)
+# Only the backup target group still comes from env (optional).
+# Admin / superadmin recognition now comes from the DB (panel accounts' tg_id).
 BOT_CREATOR_GROUP_ID: Final = _env_int("BOT_CREATOR_GROUP_ID", -1002345678901)  # backups
-BOT_CREATOR_USER_ID:  Final = _env_int("BOT_CREATOR_USER_ID", 1234567890)
+
+
+def is_panel_member(tg_id: int) -> bool:
+    """True if this Telegram id belongs to a panel account (owner/superadmin/admin)."""
+    from .db import db_is_panel_member
+    return db_is_panel_member(tg_id)
 
 # ─────────────────────────────────────────────
 #  SUPPORT CONTACT  (sent to users so they can reach a human)

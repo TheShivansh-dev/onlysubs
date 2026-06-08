@@ -653,6 +653,26 @@ def db_set_admin_role(username: str, role: str):
             )
 
 
+def db_set_admin_tgid(username: str, tg_id: Optional[int]):
+    """Set/refresh the Telegram id stored on a panel account."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE admin_panel_users SET tg_id=%s WHERE username=%s",
+                (tg_id, username),
+            )
+
+
+def db_is_panel_member(tg_id: int) -> bool:
+    """True if this Telegram id belongs to any panel account (owner/superadmin/admin)."""
+    if tg_id is None:
+        return False
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM admin_panel_users WHERE tg_id=%s LIMIT 1", (tg_id,))
+            return cur.fetchone() is not None
+
+
 def db_update_admin_username(old_username: str, new_username: str) -> bool:
     """Change a panel account's login email. Returns False on a name clash."""
     with get_conn() as conn:

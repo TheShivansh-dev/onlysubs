@@ -10,7 +10,7 @@ from telegram.ext import ContextTypes
 import html
 from datetime import datetime, timedelta
 
-from .config import ADMIN_USER_ID, get_admin_group_id
+from .config import is_panel_member, get_admin_group_id
 from .db import db_extend_registered_user, db_extend_paid_user
 from .subscription import kick_and_deactivate
 
@@ -25,7 +25,7 @@ def log(msg):
 def _is_admin(update: Update) -> bool:
     chat = update.effective_chat
     if chat and chat.type == 'private':
-        return update.effective_user.id == ADMIN_USER_ID
+        return is_panel_member(update.effective_user.id)
     return bool(chat and chat.id == get_admin_group_id())
 
 

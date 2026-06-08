@@ -29,6 +29,7 @@ from Handlers.db import (
     db_change_admin_password,
     db_update_admin_username,
     db_set_admin_role,
+    db_set_admin_tgid,
     db_get_stats,
     db_load_courses,
     db_save_course,
@@ -55,6 +56,8 @@ TOKEN_EXPIRE  = 8  # hours
 # Top-level OWNER account is seeded from env only (no secrets in code).
 OWNER_EMAIL    = os.environ.get("OWNER_EMAIL", "")
 OWNER_PASSWORD = os.environ.get("OWNER_PASSWORD", "")
+_owner_tg_raw  = os.environ.get("OWNER_TG_ID", "").strip()
+OWNER_TG_ID    = int(_owner_tg_raw) if _owner_tg_raw.lstrip("-").isdigit() else None
 
 # Role hierarchy: owner > superadmin > admin
 ROLE_RANK = {"admin": 1, "superadmin": 2, "owner": 3}
@@ -78,10 +81,14 @@ async def startup():
     if OWNER_EMAIL and OWNER_PASSWORD:
         existing = db_get_admin_user(OWNER_EMAIL)
         if not existing:
-            db_create_admin_user(OWNER_EMAIL, hash_password(OWNER_PASSWORD), role="owner")
-        elif existing.get("role") != "owner":
-            # Account already existed with a lower role — promote it to owner.
-            db_set_admin_role(OWNER_EMAIL, "owner")
+            db_create_admin_user(OWNER_EMAIL, hash_password(OWNER_PASSWORD),
+                                 role="owner", tg_id=OWNER_TG_ID)
+        else:
+            if existing.get("role") != "owner":
+                # Account already existed with a lower role — promote it to owner.
+                db_set_admin_role(OWNER_EMAIL, "owner")
+            if OWNER_TG_ID is not None and existing.get("tg_id") != OWNER_TG_ID:
+                db_set_admin_tgid(OWNER_EMAIL, OWNER_TG_ID)
     else:
         print("[STARTUP] OWNER_EMAIL / OWNER_PASSWORD not set — owner account not seeded.")
 
@@ -443,7 +450,13 @@ def change_my_email(body: MyEmailBody, current: dict = Depends(_get_current_user
 
 # ── Bot Settings  (SuperAdmin only) ───────────────────────────────────────────
 
-_HIDDEN_SETTINGS = {"BOT_CREATOR_USER_ID", "BOT_USERNAME", "BOT_CREATOR_GROUP_ID"}
+# These either live elsewhere or are read from env — never editable here.
+# ADMIN_GROUP_ID is managed by the "Admin Group" card (master_groups);
+# ADMIN_USER_ID is no longer used (admin recognition = panel accounts' tg_id).
+_HIDDEN_SETTINGS = {
+    "BOT_CREATOR_USER_ID", "BOT_USERNAME", "BOT_CREATOR_GROUP_ID",
+    "ADMIN_GROUP_ID", "ADMIN_USER_ID",
+}
 
 @app.get("/api/settings")
 def get_settings(sa: dict = Depends(_require_manager)):

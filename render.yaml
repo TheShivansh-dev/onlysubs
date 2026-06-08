@@ -15,6 +15,8 @@ services:
         sync: false          # owner login email
       - key: OWNER_PASSWORD
         sync: false          # owner login password
+      - key: OWNER_TG_ID
+        sync: false          # owner's Telegram user id (lets owner act in bot DMs)
       - key: BOT_TOKEN
         sync: false          # your bot token (BotFather)
       - key: BOT_USERNAME
