@@ -643,6 +643,16 @@ def db_change_admin_password(username: str, new_hash: str):
             )
 
 
+def db_set_admin_role(username: str, role: str):
+    """Force an account's role (used to keep the env owner as 'owner')."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE admin_panel_users SET role=%s WHERE username=%s",
+                (role, username),
+            )
+
+
 def db_update_admin_username(old_username: str, new_username: str) -> bool:
     """Change a panel account's login email. Returns False on a name clash."""
     with get_conn() as conn:

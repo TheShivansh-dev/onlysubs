@@ -28,6 +28,7 @@ from Handlers.db import (
     db_remove_admin_user,
     db_change_admin_password,
     db_update_admin_username,
+    db_set_admin_role,
     db_get_stats,
     db_load_courses,
     db_save_course,
@@ -38,7 +39,6 @@ from Handlers.db import (
     db_add_paid_user,
     db_remove_paid_user,
     db_edit_paid_user,
-    db_get_guid_stats,
     db_get_all_groups,
     db_get_all_settings,
     db_set_setting,
@@ -73,8 +73,12 @@ def startup():
     init_schema()
     # Seed the owner account from env, only if both vars are set.
     if OWNER_EMAIL and OWNER_PASSWORD:
-        if not db_get_admin_user(OWNER_EMAIL):
+        existing = db_get_admin_user(OWNER_EMAIL)
+        if not existing:
             db_create_admin_user(OWNER_EMAIL, hash_password(OWNER_PASSWORD), role="owner")
+        elif existing.get("role") != "owner":
+            # Account already existed with a lower role — promote it to owner.
+            db_set_admin_role(OWNER_EMAIL, "owner")
     else:
         print("[STARTUP] OWNER_EMAIL / OWNER_PASSWORD not set — owner account not seeded.")
 
@@ -266,14 +270,6 @@ class EditPaidUserBody(BaseModel):
 def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = Depends(_require_manager)):
     db_edit_paid_user(user_id, body.course, body.start_date, body.end_date)
     return {"ok": True}
-
-
-# ── GUIDs ─────────────────────────────────────────────────────────────────────
-
-@app.get("/api/guids")
-def guid_stats(current_user: dict = Depends(_get_current_user)):
-    """Returns {'claimed': N} — UniqueIds used so far (Approach A)."""
-    return db_get_guid_stats()
 
 
 # ── Groups ────────────────────────────────────────────────────────────────────
