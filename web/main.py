@@ -37,6 +37,7 @@ from Handlers.db import (
     db_get_all_registered_users,
     db_remove_registered_user,
     db_edit_registered_user,
+    db_reactivate_registered_user,
     db_get_all_paid_users,
     db_add_paid_user,
     db_remove_paid_user,
@@ -193,15 +194,12 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
-
 @app.get("/api/stats")
 def get_stats(current_user: dict = Depends(_get_current_user)):
     return db_get_stats()
 
 
 # ── Courses ───────────────────────────────────────────────────────────────────
-
-
 @app.get("/api/courses")
 def list_courses(current_user: dict = Depends(_get_current_user)):
     df = db_load_courses()
@@ -293,6 +291,16 @@ def edit_user(user_id: int, body: EditUserBody, current_user: dict = Depends(_ge
     db_edit_registered_user(user_id, (body.username or "").strip(),
                             body.plan_type.strip(), body.end_date.strip())
     db_add_log(current_user["username"], "user_edit", f"userid={user_id}")
+    return {"ok": True}
+
+
+@app.put("/api/users/{user_id}/activate")
+def activate_user(user_id: int, current_user: dict = Depends(_get_current_user)):
+    """Re-activate a removed subscriber whose date is still valid (not expired)."""
+    ok = db_reactivate_registered_user(user_id)
+    if not ok:
+        raise HTTPException(400, "No re-activatable subscription (expired or not found)")
+    db_add_log(current_user["username"], "user_activate", f"userid={user_id}")
     return {"ok": True}
 
 

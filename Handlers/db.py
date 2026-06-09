@@ -288,10 +288,11 @@ def db_get_active_subs_by_userid(user_id: int) -> list[dict]:
     out: dict[str, dict] = {}
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Date-valid subscriptions count even if the user was removed from the
+            # group — as long as the date hasn't expired they may rejoin.
             cur.execute(
                 "SELECT plan_type, end_date FROM registered_users "
-                "WHERE userid=%s AND isremoved=0 "
-                "AND (end_date IS NULL OR end_date >= CURRENT_DATE)",
+                "WHERE userid=%s AND (end_date IS NULL OR end_date >= CURRENT_DATE)",
                 (user_id,),
             )
             for cname, end in cur.fetchall():
@@ -518,6 +519,24 @@ def db_remove_registered_user(user_id: int, removed_date: str):
                 "WHERE userid=%s AND isremoved=0",
                 (removed_date, user_id),
             )
+
+
+def db_reactivate_registered_user(user_id: int) -> bool:
+    """
+    Bring a removed-but-still-valid subscriber back to active (isremoved=0).
+    Only flips the most recent row whose date hasn't expired. Returns True if a
+    row was reactivated.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE registered_users SET isremoved=0, removed_date=NULL "
+                "WHERE id = (SELECT id FROM registered_users "
+                "            WHERE userid=%s AND (end_date IS NULL OR end_date >= CURRENT_DATE) "
+                "            ORDER BY id DESC LIMIT 1)",
+                (user_id,),
+            )
+            return cur.rowcount > 0
 
 
 def db_extend_registered_user(user_id: int, new_end_date: str):

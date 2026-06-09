@@ -979,11 +979,28 @@ function renderUsers(users) {
   }
   tbody.innerHTML = users.map((u, i) => {
     const d = _daysLeft(u.end_date);
-    const dl = u.isremoved ? '–'
-      : d === null ? '–'
+    const expired = d !== null && d < 0;
+    // Days Left always reflects the subscription date, even if removed.
+    const dl = d === null ? '–'
       : d < 0 ? `<span class="text-danger">${d}</span>`
       : d <= 5 ? `<span class="text-warning fw-semibold">${d}</span>`
       : d;
+    // Status: removed → Inactive, date passed → Expired, else Active.
+    const statusHtml = u.isremoved
+      ? '<span class="badge-inactive">Inactive</span>'
+      : expired
+        ? '<span class="badge-inactive">Expired</span>'
+        : '<span class="badge-active">Active</span>';
+    // Actions: active users can be edited/removed; an inactive user whose date
+    // is still valid can be reactivated (don't lock them out forever).
+    let actions = '';
+    if (!u.isremoved) {
+      actions = `
+        <button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="openEditUser(${u.userid})">Edit</button>
+        <button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>`;
+    } else if (!expired) {
+      actions = `<button class="btn btn-success btn-sm py-0 px-2" onclick="activateUser(${u.userid})">Activate</button>`;
+    }
     return `
     <tr>
       <td class="text-muted">${i + 1}</td>
@@ -993,12 +1010,8 @@ function renderUsers(users) {
       <td>${escHtml(u.registration_date || '–')}</td>
       <td>${escHtml(u.end_date || '–')}</td>
       <td>${dl}</td>
-      <td>${statusBadge(!u.isremoved)}</td>
-      <td>
-        ${!u.isremoved ? `
-          <button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="openEditUser(${u.userid})">Edit</button>
-          <button class="btn btn-danger btn-sm py-0 px-2" onclick="removeUser(${u.userid})">Remove</button>` : ''}
-      </td>
+      <td>${statusHtml}</td>
+      <td>${actions}</td>
     </tr>`;
   }).join('');
   countEl.textContent = `${users.length} user${users.length === 1 ? '' : 's'}`;
@@ -1029,6 +1042,12 @@ document.getElementById('ru-confirm').addEventListener('click', async () => {
     toast('Failed to remove user', 'error');
   }
 });
+
+async function activateUser(userId) {
+  const res = await apiFetch(`/api/users/${userId}/activate`, { method: 'PUT' });
+  if (res && res.ok) { toast('Subscriber re-activated'); loadUsers(); }
+  else { const d = res ? await res.json().catch(() => ({})) : {}; toast(d.detail || 'Failed to activate', 'error'); }
+}
 
 async function openEditUser(userId) {
   const u = _allUsers.find(x => String(x.userid) === String(userId));

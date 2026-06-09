@@ -15,6 +15,7 @@ from .config import (
 from .db import (
     db_save_registered_user,
     db_save_invite_link,
+    db_reactivate_registered_user,
     db_get_active_registered_users,
     db_get_user_by_userid,
     db_get_all_paid_users,
@@ -203,7 +204,15 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     log(f"[JOIN] {user.id} (@{user.username}) joined {group_id} via '{link_name or 'unknown link'}'")
 
     if not link_name.startswith("c_"):
-        return   # rejoin / manual join → nothing to bind
+        # Rejoin / manual join → nothing new to bind, but if this is a known
+        # subscriber who was removed (and is still within date), bring them back
+        # to active so the panel reflects that they're in the group again.
+        try:
+            if db_reactivate_registered_user(user.id):
+                log(f"[REJOIN] re-activated subscriber {user.id} on join to {group_id}")
+        except Exception as e:
+            log(f"[REJOIN] reactivate failed for {user.id}: {e}")
+        return
 
     try:
         _, unique_id, months_s = link_name.split("_", 2)
@@ -292,6 +301,16 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             row = db_get_user_by_userid(user_id)
             end_date = row['end_date'] if row else _today_plus(months)
+            # Only let them back in while the subscription date is still valid.
+            ed = _parse_end_date(end_date)
+            if ed is not None and (ed - datetime.now().date()).days < 0:
+                await update.message.reply_text(
+                    "<b>Subscription expired.</b>\n\n"
+                    "Your access for this course has ended. Please renew it.\n\n"
+                    f"To renew, contact {get_support_contact()}",
+                    parse_mode="HTML"
+                )
+                return
             invite = await _make_rejoin_invite(context, course, user_id)
             await _send_join_link(update, course, months, end_date, invite)
         else:
