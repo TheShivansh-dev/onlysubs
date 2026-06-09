@@ -243,12 +243,42 @@ def list_users(current_user: dict = Depends(_get_current_user)):
     return users
 
 
+async def _kick_from_group(kind: str, user_id: int) -> bool:
+    """
+    Kick a user out of their course group via the running bot — WITHOUT
+    leaving them banned. Telegram's only removal API is ban_chat_member, so we
+    remove them and IMMEDIATELY unban (in a finally) so they're never banned and
+    can rejoin later on a new subscription.
+    """
+    if _bot_app is None:
+        return False
+    from Handlers.subscription import resolve_group_id
+    group_id = resolve_group_id(kind, user_id)
+    if not group_id:
+        return False
+    try:
+        await _bot_app.bot.ban_chat_member(chat_id=int(group_id), user_id=user_id)
+        return True
+    except Exception as e:
+        print(f"[KICK] could not remove {user_id} from {group_id}: {e}")
+        return False
+    finally:
+        # Always lift the ban so the user is never left blocked.
+        try:
+            await _bot_app.bot.unban_chat_member(
+                chat_id=int(group_id), user_id=user_id, only_if_banned=True)
+        except Exception as e:
+            print(f"[KICK] could not unban {user_id} from {group_id}: {e}")
+
+
 @app.delete("/api/users/{user_id}")
-def remove_user(user_id: int, current_user: dict = Depends(_get_current_user)):
+async def remove_user(user_id: int, current_user: dict = Depends(_get_current_user)):
+    kicked = await _kick_from_group("r", user_id)
     today = str(datetime.utcnow().date())
     db_remove_registered_user(user_id, today)
-    db_add_log(current_user["username"], "user_remove", f"userid={user_id}")
-    return {"ok": True}
+    db_add_log(current_user["username"], "user_remove",
+               f"userid={user_id} kicked={kicked}")
+    return {"ok": True, "kicked": kicked}
 
 
 class EditUserBody(BaseModel):

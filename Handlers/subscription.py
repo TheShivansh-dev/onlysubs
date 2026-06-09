@@ -394,18 +394,29 @@ def resolve_group_id(kind: str, user_id: int):
 
 
 async def kick_user(context: ContextTypes.DEFAULT_TYPE, group_id, user_id: int) -> bool:
-    """Ban then immediately unban so the user can rejoin on a future subscription."""
+    """
+    Kick a user from the group WITHOUT leaving them banned. Telegram's only
+    removal API is ban_chat_member, so we remove then IMMEDIATELY unban (in a
+    finally) — the user is never left banned and can rejoin on a future
+    subscription.
+    """
     if not group_id:
         log(f"[KICK] No group_id for user {user_id}; skipping removal")
         return False
     try:
         await context.bot.ban_chat_member(chat_id=int(group_id), user_id=user_id)
-        await context.bot.unban_chat_member(chat_id=int(group_id), user_id=user_id, only_if_banned=True)
         log(f"[KICK] Removed user {user_id} from group {group_id}")
         return True
     except Exception as e:
         log(f"[KICK] Could not remove user {user_id} from {group_id}: {e}")
         return False
+    finally:
+        # Always lift the ban so the user is never left blocked.
+        try:
+            await context.bot.unban_chat_member(
+                chat_id=int(group_id), user_id=user_id, only_if_banned=True)
+        except Exception as e:
+            log(f"[KICK] Could not unban user {user_id} from {group_id}: {e}")
 
 
 async def kick_and_deactivate(context: ContextTypes.DEFAULT_TYPE, kind: str, user_id: int) -> bool:
