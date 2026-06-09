@@ -512,6 +512,61 @@ def owner_edit_account(username: str, body: OwnerEditAccountBody,
     return {"ok": True, "username": final_name}
 
 
+# ── Expiry scheduler  (owner only — testing/maintenance) ──────────────────────
+#  Owner can change the daily run time of the expiry check, and trigger a run
+#  immediately to test reminders / admin-group cards / auto-removal.
+
+class _RunCtx:
+    """Minimal stand-in for a PTB job context — exposes only .bot."""
+    def __init__(self, bot):
+        self.bot = bot
+
+
+@app.get("/api/owner/scheduler")
+def get_scheduler(owner: dict = Depends(_require_owner)):
+    from Handlers.db import db_get_setting
+    from bot import DEFAULT_EXPIRY_TIME, EXPIRY_JOB_NAME
+    hhmm = db_get_setting("EXPIRY_CHECK_TIME", DEFAULT_EXPIRY_TIME)
+    next_run = None
+    if _bot_app is not None and _bot_app.job_queue is not None:
+        jobs = _bot_app.job_queue.get_jobs_by_name(EXPIRY_JOB_NAME)
+        if jobs and jobs[0].next_t:
+            next_run = jobs[0].next_t.isoformat()
+    return {"time": hhmm, "next_run": next_run, "bot_running": _bot_app is not None}
+
+
+class SchedulerBody(BaseModel):
+    time: str    # "HH:MM" in IST
+
+
+@app.put("/api/owner/scheduler")
+def set_scheduler(body: SchedulerBody, owner: dict = Depends(_require_owner)):
+    raw = (body.time or "").strip()
+    parts = raw.split(":")
+    if len(parts) != 2 or not (parts[0].isdigit() and parts[1].isdigit()) \
+            or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+        raise HTTPException(400, "Time must be HH:MM (00:00–23:59), IST")
+    hhmm = f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+    db_set_setting("EXPIRY_CHECK_TIME", hhmm)
+    rescheduled = False
+    if _bot_app is not None:
+        from bot import reschedule_expiry_job
+        reschedule_expiry_job(_bot_app, hhmm)
+        rescheduled = True
+    db_add_log(owner["username"], "scheduler_set", f"time={hhmm} (IST)")
+    return {"ok": True, "time": hhmm, "rescheduled": rescheduled}
+
+
+@app.post("/api/owner/run-expiry")
+async def run_expiry_now(owner: dict = Depends(_require_owner)):
+    if _bot_app is None:
+        raise HTTPException(503, "Bot is not running in this process (set RUN_BOT=1).")
+    from Handlers.subscription import check_subscription_expiry
+    await check_subscription_expiry(_RunCtx(_bot_app.bot))
+    db_add_log(owner["username"], "run_expiry", "manual trigger")
+    return {"ok": True}
+
+
 # ── Self profile  (any logged-in account) ─────────────────────────────────────
 
 @app.get("/api/me")
@@ -557,6 +612,8 @@ def change_my_email(body: MyEmailBody, current: dict = Depends(_get_current_user
 _HIDDEN_SETTINGS = {
     "BOT_CREATOR_USER_ID", "BOT_USERNAME", "BOT_CREATOR_GROUP_ID",
     "ADMIN_GROUP_ID", "ADMIN_USER_ID",
+    # Managed via the owner-only Expiry Scheduler card, not the raw settings table.
+    "EXPIRY_CHECK_TIME",
 }
 
 @app.get("/api/settings")

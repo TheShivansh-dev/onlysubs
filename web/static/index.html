@@ -564,6 +564,38 @@
 
     <!-- ── Settings tab (superadmin only) ── -->
     <div class="tab-pane" id="tab-settings">
+      <!-- Owner-only: expiry scheduler & manual trigger (for testing) -->
+      <div class="section-card mb-3" id="scheduler-card" style="display:none">
+        <div class="sc-header">
+          <h6><i class="bi bi-clock-history me-2"></i>Expiry Scheduler <span class="badge bg-warning text-dark ms-1">owner</span></h6>
+          <span class="text-muted small">Daily reminder / removal check time (IST)</span>
+        </div>
+        <div class="sc-body">
+          <p class="small text-muted mb-2">
+            Next run: <strong id="sched-next">–</strong>
+          </p>
+          <form id="scheduler-form" class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label small fw-semibold">Daily time (HH:MM, IST)</label>
+              <input type="time" class="form-control form-control-sm" id="sched-time" required />
+            </div>
+            <div class="col-md-3">
+              <button type="submit" class="btn btn-primary btn-sm w-100">Save time</button>
+            </div>
+            <div class="col-md-5">
+              <button type="button" class="btn btn-outline-danger btn-sm w-100" id="sched-run">
+                <i class="bi bi-play-fill"></i> Run expiry check now
+              </button>
+            </div>
+          </form>
+          <p class="small text-muted mt-2 mb-0">
+            “Run now” fires the whole check immediately — 5/3-day reminders, the
+            admin-group card (1 day before), and auto-removal (expiry day) — based
+            on each user’s dates. To test the admin-group message, set a user’s
+            expiry to tomorrow; to test removal, set it to today.
+          </p>
+        </div>
+      </div>
       <div class="section-card mb-3">
         <div class="sc-header">
           <h6><i class="bi bi-people-fill me-2"></i>Admin Group</h6>
@@ -1321,6 +1353,7 @@ document.getElementById('ag-clear').addEventListener('click', async () => {
 
 async function loadSettings() {
   loadAdminGroup();
+  loadScheduler();
   const res = await apiFetch('/api/settings');
   if (!res) return;
   const settings = await res.json();
@@ -1352,6 +1385,45 @@ async function saveSetting(key) {
   if (res && res.ok) toast(`${key} updated`);
   else toast('Failed to save setting', 'error');
 }
+
+// ── Owner-only: expiry scheduler ──
+async function loadScheduler() {
+  const card = document.getElementById('scheduler-card');
+  if (getRole() !== 'owner') { card.style.display = 'none'; return; }
+  card.style.display = '';
+  const res = await apiFetch('/api/owner/scheduler');
+  if (!res || !res.ok) return;
+  const d = await res.json();
+  document.getElementById('sched-time').value = d.time || '08:00';
+  document.getElementById('sched-next').textContent =
+    d.next_run ? new Date(d.next_run).toLocaleString() : (d.bot_running ? '–' : 'bot not running');
+}
+
+document.getElementById('scheduler-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const time = document.getElementById('sched-time').value;
+  const res = await apiFetch('/api/owner/scheduler', {
+    method: 'PUT', body: JSON.stringify({ time }),
+  });
+  if (res && res.ok) {
+    const d = await res.json();
+    toast(d.rescheduled ? `Daily check set to ${d.time} IST` : `Saved ${d.time} (applies on next bot start)`);
+    loadScheduler();
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to save time', 'error');
+  }
+});
+
+document.getElementById('sched-run').addEventListener('click', async () => {
+  const btn = document.getElementById('sched-run');
+  if (!confirm('Run the expiry check right now for ALL users?')) return;
+  btn.disabled = true;
+  const res = await apiFetch('/api/owner/run-expiry', { method: 'POST' });
+  btn.disabled = false;
+  if (res && res.ok) { toast('Expiry check ran — check your groups/DMs'); loadUsers(); }
+  else { const d = res ? await res.json().catch(() => ({})) : {}; toast(d.detail || 'Failed to run', 'error'); }
+});
 
 // ══════════════════════════════════════════════════════════════
 //  Reminders

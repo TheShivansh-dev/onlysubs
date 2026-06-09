@@ -1,6 +1,6 @@
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from Handlers.config import TOKEN
-from Handlers.db import init_schema
+from Handlers.db import init_schema, db_get_setting
 from Handlers.subscription import (
     start_command,
     help_command,
@@ -16,6 +16,36 @@ from pytz import timezone
 import datetime
 
 ALLOWED_UPDATES = ["message", "callback_query", "chat_member"]
+
+EXPIRY_JOB_NAME = "expiry_check"
+DEFAULT_EXPIRY_TIME = "08:00"   # IST, used if the DB setting is missing/invalid
+IST = timezone('Asia/Kolkata')
+
+
+def _ist_time(hhmm: str) -> datetime.time:
+    """Parse 'HH:MM' into an IST-aware time; falls back to 08:00 IST."""
+    try:
+        hh, mm = (int(x) for x in hhmm.strip().split(':'))
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return datetime.time(hour=hh, minute=mm, tzinfo=IST)
+    except Exception:
+        pass
+    return datetime.time(hour=8, minute=0, tzinfo=IST)
+
+
+def reschedule_expiry_job(application: Application, hhmm: str) -> str:
+    """
+    (Re)schedule the daily expiry check at the given 'HH:MM' IST time.
+    Removes any existing expiry job first. Returns the HH:MM actually used.
+    Reused by the web panel so the owner can change the run time live.
+    """
+    for job in application.job_queue.get_jobs_by_name(EXPIRY_JOB_NAME):
+        job.schedule_removal()
+    t = _ist_time(hhmm)
+    application.job_queue.run_daily(
+        check_subscription_expiry, time=t, name=EXPIRY_JOB_NAME,
+    )
+    return f"{t.hour:02d}:{t.minute:02d}"
 
 
 def build_application() -> Application:
@@ -42,12 +72,8 @@ def build_application() -> Application:
     # ── New chat members (console log) ──
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, log_user_join))
 
-    # ── Daily 8 AM IST expiry check ──
-    ist = timezone('Asia/Kolkata')
-    application.job_queue.run_daily(
-        check_subscription_expiry,
-        time=datetime.time(hour=8, minute=0, tzinfo=ist)
-    )
+    # ── Daily expiry check (time configurable by the owner from the panel) ──
+    reschedule_expiry_job(application, db_get_setting('EXPIRY_CHECK_TIME', DEFAULT_EXPIRY_TIME))
 
     # ── Data backup every 30 minutes ──
     application.job_queue.run_repeating(backup_data_files, interval=1800, first=60)

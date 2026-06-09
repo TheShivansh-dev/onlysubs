@@ -142,5 +142,6 @@ INSERT INTO bot_settings (key, value, label) VALUES
     ('BOT_CREATOR_GROUP_ID', '-1002345678901',      'Backup Group ID'),
     ('BOT_CREATOR_USER_ID',  '1234567890',          'Bot Creator User ID'),
     ('BOT_USERNAME',         '@tesingt_04bot',      'Bot Username'),
-    ('SUPPORT_CONTACT',      '@helpsteno',          'Support Contact')
+    ('SUPPORT_CONTACT',      '@helpsteno',          'Support Contact'),
+    ('EXPIRY_CHECK_TIME',    '08:00',               'Daily Expiry Check Time (IST)')
 ON CONFLICT (key) DO NOTHING;
