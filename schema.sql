@@ -55,6 +55,12 @@ DO $$ BEGIN
   ALTER TABLE guids ADD COLUMN claimed_date DATE;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+-- The single-use invite link issued for a UniqueId before anyone has joined,
+-- so re-clicking re-uses the same link instead of minting extra shareable ones.
+DO $$ BEGIN
+  ALTER TABLE guids ADD COLUMN pending_link TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS courses (
     id          SERIAL PRIMARY KEY,

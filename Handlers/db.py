@@ -362,6 +362,26 @@ def db_claim_link(guid: str, userid: int):
             )
 
 
+def db_get_pending_link(guid: str) -> Optional[str]:
+    """The not-yet-claimed invite link issued for this UniqueId, or None."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pending_link FROM guids WHERE guid=%s LIMIT 1", (guid,))
+            row = cur.fetchone()
+    return row[0] if row and row[0] else None
+
+
+def db_set_pending_link(guid: str, link: str):
+    """Store the invite link issued for a UniqueId (before anyone has joined)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO guids (guid, pending_link) VALUES (%s, %s) "
+                "ON CONFLICT (guid) DO UPDATE SET pending_link=EXCLUDED.pending_link",
+                (guid, link),
+            )
+
+
 def db_get_guid_stats() -> dict:
     """Return {'claimed': int} — how many UniqueIds have been used."""
     with get_conn() as conn:

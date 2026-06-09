@@ -166,6 +166,18 @@ def claim_link(unique_id: str, userid: int):
     db_claim_link(unique_id, userid)
 
 
+def get_pending_link(unique_id: str) -> Optional[str]:
+    """The invite link already issued for a not-yet-joined UniqueId, or None."""
+    from .db import db_get_pending_link
+    return db_get_pending_link(unique_id)
+
+
+def set_pending_link(unique_id: str, link: str):
+    """Remember the invite link issued for a UniqueId so re-clicks reuse it."""
+    from .db import db_set_pending_link
+    db_set_pending_link(unique_id, link)
+
+
 # ─────────────────────────────────────────────
 #  DISPLAY MESSAGE
 # ─────────────────────────────────────────────
