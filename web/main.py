@@ -201,6 +201,7 @@ def get_stats(current_user: dict = Depends(_get_current_user)):
 
 # ── Courses ───────────────────────────────────────────────────────────────────
 
+
 @app.get("/api/courses")
 def list_courses(current_user: dict = Depends(_get_current_user)):
     df = db_load_courses()
