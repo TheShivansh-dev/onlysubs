@@ -12,8 +12,6 @@ from .config import (
 )
 from .db import (
     db_save_registered_user,
-    db_save_invite_link,
-    db_set_registered_invite_link,
     db_get_active_registered_users,
     db_get_user_by_userid,
     db_get_all_paid_users,
@@ -22,6 +20,7 @@ from .db import (
     db_remove_paid_user,
     db_get_active_subs_by_userid,
     db_user_has_active_sub_for_group,
+    db_get_courses_by_group_id,
 )
 import html
 import uuid
@@ -41,32 +40,27 @@ def log(msg):
 #  Format: <UniqueId>_<CourseCode>_<Months>
 # ─────────────────────────────────────────────
 
-async def _make_one_time_invite(context: ContextTypes.DEFAULT_TYPE,
-                                course: dict, user_id: int) -> str | None:
+async def _make_claim_invite(context: ContextTypes.DEFAULT_TYPE,
+                             course: dict, unique_id: str, months: int) -> str | None:
     """
-    Create a fresh single-use (member_limit=1) invite link for this user.
-    Needs the group's numeric chat id (course['group_id']) and the bot to be
-    an admin there. Falls back to a static group_link if no group_id is set.
+    First-time claim link for a UniqueId. It requires approval
+    (creates_join_request) and encodes the claim in its name as 'c_<uid>_<months>'.
+    The subscription is bound to whoever ACTUALLY joins (see _approve_claim), and
+    the UniqueId is only consumed once a real join is approved — not on click.
     """
     group_id = course.get('group_id')
-    if group_id:
-        try:
-            link_id = str(uuid.uuid4())[:8]
-            invite  = await context.bot.create_chat_invite_link(
-                chat_id=int(group_id),
-                member_limit=1,
-                name=f"u{user_id}_{link_id}",
-            )
-            try:
-                db_save_invite_link(link_id, user_id, invite.invite_link)
-            except Exception as e:
-                log(f"[LINK] could not record invite link: {e}")
-            return invite.invite_link
-        except Exception as e:
-            log(f"[LINK] create_chat_invite_link failed for group {group_id}, user {user_id}: {e}")
-            return None
-    # No numeric group id configured — fall back to a static link if present.
-    return course.get('group_link') or None
+    if not group_id:
+        return course.get('group_link') or None
+    try:
+        invite = await context.bot.create_chat_invite_link(
+            chat_id=int(group_id),
+            creates_join_request=True,
+            name=f"c_{unique_id}_{months}",
+        )
+        return invite.invite_link
+    except Exception as e:
+        log(f"[CLAIM] create_chat_invite_link failed for group {group_id}, uid {unique_id}: {e}")
+        return course.get('group_link') or None
 
 
 async def _make_join_request_invite(context: ContextTypes.DEFAULT_TYPE,
@@ -105,34 +99,16 @@ async def _is_group_member(context: ContextTypes.DEFAULT_TYPE,
         return False
 
 
-async def _get_or_create_invite(context: ContextTypes.DEFAULT_TYPE,
-                                course: dict, user_id: int) -> str | None:
-    """
-    Return THIS user's invite link, reusing the one already issued for them.
-    A new member_limit=1 link is minted only if none was stored yet — so
-    re-clicking the deep link never produces extra links that could be shared.
-    """
-    row = db_get_user_by_userid(user_id)
-    stored = (row.get('invite_link_url') or '').strip() if row else ''
-    if stored:
-        return stored
-    invite = await _make_one_time_invite(context, course, user_id)
-    if invite:
-        try:
-            db_set_registered_invite_link(user_id, invite)
-        except Exception as e:
-            log(f"[LINK] could not persist invite link: {e}")
-    return invite
-
-
-async def _send_access(context: ContextTypes.DEFAULT_TYPE, update: Update,
-                       course: dict, months: int, end_date):
-    """Send the user's single group invite link + support contact."""
-    invite = await _get_or_create_invite(context, course, update.effective_user.id)
-    msg    = get_display_message(course['course_name'], months, end_date)
+async def _send_join_link(update: Update, course: dict, months: int,
+                          end_date, invite: str | None):
+    """Send a group join link + support contact. The link is approval-gated, so
+    the user is admitted only after the bot approves their join request."""
+    msg = get_display_message(course['course_name'], months, end_date)
     if invite:
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Join Group", url=invite)]])
-        await update.message.reply_text(msg, reply_markup=kb, parse_mode="HTML")
+        await update.message.reply_text(
+            msg + "\n\n👉 Tap to join — you'll be approved automatically.",
+            reply_markup=kb, parse_mode="HTML")
     else:
         await update.message.reply_text(
             msg + f"\n\n⚠️ Couldn't create your invite link — contact {get_support_contact()}",
@@ -196,17 +172,84 @@ async def _recover_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def _approve_claim(context: ContextTypes.DEFAULT_TYPE, req, link_name: str):
+    """
+    First-time claim join (link named 'c_<uid>_<months>'). Bind the UniqueId and
+    create the subscription for the account that ACTUALLY joins — not whoever
+    clicked the bot. The UniqueId is consumed here, at the real join.
+    """
+    user_id  = req.from_user.id
+    group_id = req.chat.id
+    username = req.from_user.username or req.from_user.first_name
+
+    try:
+        _, unique_id, months_s = link_name.split("_", 2)
+        months = max(1, int(months_s))
+    except Exception:
+        unique_id, months = None, 1
+
+    # If the UniqueId was already consumed by a different account, refuse.
+    claimed   = get_claimed_link(unique_id) if unique_id else None
+    bound_uid = claimed.get('claimed_userid') if claimed else None
+    if bound_uid is not None and bound_uid != user_id:
+        try:
+            await context.bot.decline_chat_join_request(chat_id=group_id, user_id=user_id)
+            log(f"[CLAIM] declined {user_id} -> {group_id}: uid {unique_id} already used by {bound_uid}")
+        except Exception as e:
+            log(f"[CLAIM] decline error {user_id}/{group_id}: {e}")
+        return
+
+    try:
+        await context.bot.approve_chat_join_request(chat_id=group_id, user_id=user_id)
+    except Exception as e:
+        log(f"[CLAIM] approve failed {user_id}/{group_id}: {e}")
+        return
+
+    # Record the real joiner as the subscriber (only if this is a brand-new bind).
+    if bound_uid is None:
+        courses     = db_get_courses_by_group_id(group_id)
+        course_name = courses[0]['course_name'] if courses else ''
+        today    = datetime.now().date()
+        end_date = today + timedelta(days=30 * months)
+        try:
+            db_save_registered_user(
+                userid=user_id,
+                username=username,
+                invite_link_id=str(uuid.uuid4())[:8],
+                invite_link_url='',
+                registration_date=str(today),
+                end_date=str(end_date),
+                plan_type=course_name,
+                link_used=1,
+            )
+        except Exception as e:
+            log(f"[CLAIM] could not save subscriber {user_id}: {e}")
+        if unique_id:
+            claim_link(unique_id, user_id)   # bind + consume the UniqueId now
+        log(f"[CLAIM] uid={unique_id} bound to joiner {user_id} (@{username}) "
+            f"course={course_name} ({months}m) expires={end_date}")
+
+
 async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Approve a Telegram join request only if the requesting account holds an
-    active subscription for that group; otherwise decline. This is what makes
-    rejoin links un-shareable — a forwarded link is useless to an outsider.
+    Gate every join request. A first-time claim link binds the subscription to
+    the real joiner; any other link (rejoin/recovery) is approved only if that
+    account already holds an active subscription for the group. Either way a
+    forwarded link is useless to an outsider.
     """
     req = update.chat_join_request
     if req is None:
         return
-    user_id  = req.from_user.id
-    group_id = req.chat.id
+    user_id   = req.from_user.id
+    group_id  = req.chat.id
+    link_name = (req.invite_link.name if req.invite_link else "") or ""
+
+    # First-time claim → bind to whoever joins.
+    if link_name.startswith("c_"):
+        await _approve_claim(context, req, link_name)
+        return
+
+    # Rejoin / recovery → must already be an active subscriber.
     try:
         if db_user_has_active_sub_for_group(user_id, group_id):
             await context.bot.approve_chat_join_request(chat_id=group_id, user_id=user_id)
@@ -247,13 +290,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ── Approach A: trust-on-first-use, bound to one Telegram user ──
+    # ── Bind-on-join model ──
+    # A UniqueId is consumed only once someone ACTUALLY joins the group via the
+    # bot link (claimed_userid is set at approval time, not at click). Until then
+    # it stays open. Whoever joins becomes the bound subscriber recorded in the
+    # DB — guaranteeing the DB user id always equals the real group member.
     claimed = get_claimed_link(unique_id)
+    bound_uid = claimed.get('claimed_userid') if claimed else None
 
-    if claimed and claimed.get('claimed_userid') is not None:
-        if claimed['claimed_userid'] == user_id:
-            # Same user, same link.
-            # If they're already inside the group, don't hand out any link.
+    if bound_uid is not None:
+        # A real join already happened on this UniqueId → it's locked.
+        if bound_uid == user_id:
+            # The bound subscriber is back (e.g. they left the group).
             if await _is_group_member(context, course.get('group_id'), user_id):
                 await update.message.reply_text(
                     "<b>You already have access ✅</b>\n\n"
@@ -262,13 +310,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML"
                 )
                 return
-            # Not a member yet → give back the SAME link issued earlier
-            # (never a fresh one — that's what allowed the leak).
             row = db_get_user_by_userid(user_id)
             end_date = row['end_date'] if row else _today_plus(months)
-            await _send_access(context, update, course, months, end_date)
+            invite = await _make_join_request_invite(context, course, user_id)
+            await _send_join_link(update, course, months, end_date, invite)
         else:
-            # A different account is trying to reuse this link → block.
+            # Someone else already joined on this UniqueId → block.
             await update.message.reply_text(
                 "<b>Link expired.</b>\n\n"
                 "This access link has already been used by another account.\n\n"
@@ -277,25 +324,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # ── First use → register the subscription ──
-    today    = datetime.now().date()
-    end_date = today + timedelta(days=30 * months)
-
-    db_save_registered_user(
-        userid=user_id,
-        username=username,
-        invite_link_id=str(uuid.uuid4())[:8],
-        invite_link_url='',
-        registration_date=str(today),
-        end_date=str(end_date),
-        plan_type=course['course_name'],
-        link_used=1,
-    )
-    claim_link(unique_id, user_id)
-
-    log(f"[REGISTER] user={user_id} (@{username}) -> {course['course_name']} "
-        f"({months}m) expires={end_date}")
-    await _send_access(context, update, course, months, end_date)
+    # ── Not yet joined → hand out a claim link. The subscription is created and
+    #    the UniqueId bound only when the join request is approved. ──
+    invite = await _make_claim_invite(context, course, unique_id, months)
+    log(f"[CLAIM] issued claim link uid={unique_id} -> {course['course_name']} ({months}m)")
+    await _send_join_link(update, course, months, _today_plus(months), invite)
 
 
 def _today_plus(months: int):
