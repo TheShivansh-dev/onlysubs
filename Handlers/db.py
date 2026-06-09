@@ -265,6 +265,67 @@ def db_get_course_by_name(course_name: str) -> Optional[dict]:
     return dict(zip(_COURSE_COLS, row)) if row else None
 
 
+def db_get_courses_by_group_id(group_id: int) -> list[dict]:
+    """All courses mapped to a given numeric group id (usually one)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, course_name, course_code, group_link, group_id "
+                "FROM courses WHERE group_id=%s",
+                (group_id,),
+            )
+            rows = cur.fetchall()
+    return [dict(zip(_COURSE_COLS, r)) for r in rows]
+
+
+def db_get_active_subs_by_userid(user_id: int) -> list[dict]:
+    """
+    Every ACTIVE (non-expired) subscription this Telegram user holds, across
+    both the deep-link 'registered_users' and the panel 'paid_users' tables.
+    A NULL end_date counts as active (no expiry). Returns
+    [{course_name, end_date, source}] deduped by course name.
+    """
+    out: dict[str, dict] = {}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT plan_type, end_date FROM registered_users "
+                "WHERE userid=%s AND isremoved=0 "
+                "AND (end_date IS NULL OR end_date >= CURRENT_DATE)",
+                (user_id,),
+            )
+            for cname, end in cur.fetchall():
+                if cname:
+                    out[str(cname).strip()] = {"course_name": str(cname).strip(),
+                                               "end_date": end, "source": "r"}
+            cur.execute(
+                "SELECT course, end_date FROM paid_users "
+                "WHERE user_id=%s AND is_active=1 "
+                "AND (end_date IS NULL OR end_date >= CURRENT_DATE)",
+                (user_id,),
+            )
+            for cname, end in cur.fetchall():
+                if cname and str(cname).strip() not in out:
+                    out[str(cname).strip()] = {"course_name": str(cname).strip(),
+                                               "end_date": end, "source": "p"}
+    return list(out.values())
+
+
+def db_user_has_active_sub_for_group(user_id: int, group_id: int) -> bool:
+    """
+    True if this user holds an active (non-expired) subscription whose course
+    maps to the given group id. Used to approve/deny Telegram join requests.
+    """
+    courses = db_get_courses_by_group_id(group_id)
+    if not courses:
+        return False
+    names = {c["course_name"].strip().lower() for c in courses if c.get("course_name")}
+    for sub in db_get_active_subs_by_userid(user_id):
+        if sub["course_name"].strip().lower() in names:
+            return True
+    return False
+
+
 # ─────────────────────────────────────────────
 #  GUIDs
 # ─────────────────────────────────────────────

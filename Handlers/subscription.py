@@ -20,6 +20,8 @@ from .db import (
     db_get_paid_user,
     db_remove_registered_user,
     db_remove_paid_user,
+    db_get_active_subs_by_userid,
+    db_user_has_active_sub_for_group,
 )
 import html
 import uuid
@@ -65,6 +67,30 @@ async def _make_one_time_invite(context: ContextTypes.DEFAULT_TYPE,
             return None
     # No numeric group id configured — fall back to a static link if present.
     return course.get('group_link') or None
+
+
+async def _make_join_request_invite(context: ContextTypes.DEFAULT_TYPE,
+                                    course: dict, user_id: int) -> str | None:
+    """
+    Create an invite link that requires admin approval (creates_join_request).
+    Even if the user forwards this link, only an account that actually holds an
+    active subscription for this group gets approved (see handle_join_request),
+    so a shared link can never let an outsider in. Used for rejoin/recovery.
+    """
+    group_id = course.get('group_id')
+    if not group_id:
+        return course.get('group_link') or None
+    try:
+        link_id = str(uuid.uuid4())[:8]
+        invite  = await context.bot.create_chat_invite_link(
+            chat_id=int(group_id),
+            creates_join_request=True,
+            name=f"rejoin_{user_id}_{link_id}",
+        )
+        return invite.invite_link
+    except Exception as e:
+        log(f"[REJOIN] create_chat_invite_link failed for group {group_id}, user {user_id}: {e}")
+        return course.get('group_link') or None
 
 
 async def _is_group_member(context: ContextTypes.DEFAULT_TYPE,
@@ -114,18 +140,91 @@ async def _send_access(context: ContextTypes.DEFAULT_TYPE, update: Update,
         )
 
 
+async def _recover_access(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Blank /start (or any /start with no valid payload) → look the user up by
+    their Telegram id. If they hold active (non-expired) subscriptions, hand
+    them a rejoin link for every course group they're not already in. Otherwise
+    point them at support. Rejoin links require approval, so they can't be
+    shared to outsiders (see handle_join_request).
+    """
+    user_id = update.effective_user.id
+    await update.message.reply_text("🔎 <b>Checking your details…</b>", parse_mode="HTML")
+
+    try:
+        subs = db_get_active_subs_by_userid(user_id)
+    except Exception as e:
+        log(f"[RECOVER] lookup failed for {user_id}: {e}")
+        subs = []
+
+    if not subs:
+        await update.message.reply_text(
+            "<b>No active subscription found.</b>\n\n"
+            "We couldn't find an active subscription linked to your Telegram account.\n\n"
+            f"If you believe this is a mistake, contact {get_support_contact()}",
+            parse_mode="HTML"
+        )
+        return
+
+    sent = 0
+    for sub in subs:
+        course = get_course_by_name(sub["course_name"])
+        if not course:
+            continue
+        group_id = course.get("group_id")
+        # Already inside this group → nothing to do.
+        if group_id and await _is_group_member(context, group_id, user_id):
+            continue
+        invite = await _make_join_request_invite(context, course, user_id)
+        if not invite:
+            continue
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            f"Rejoin {course['course_name']}", url=invite)]])
+        await update.message.reply_text(
+            f"<b>{html.escape(course['course_name'])}</b>\n"
+            "Tap below to rejoin — you'll be approved automatically.",
+            reply_markup=kb, parse_mode="HTML"
+        )
+        sent += 1
+
+    if sent == 0:
+        await update.message.reply_text(
+            "<b>You already have access ✅</b>\n\n"
+            "You're already in all of your group(s).\n\n"
+            f"Need help? Contact {get_support_contact()}",
+            parse_mode="HTML"
+        )
+
+
+async def handle_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Approve a Telegram join request only if the requesting account holds an
+    active subscription for that group; otherwise decline. This is what makes
+    rejoin links un-shareable — a forwarded link is useless to an outsider.
+    """
+    req = update.chat_join_request
+    if req is None:
+        return
+    user_id  = req.from_user.id
+    group_id = req.chat.id
+    try:
+        if db_user_has_active_sub_for_group(user_id, group_id):
+            await context.bot.approve_chat_join_request(chat_id=group_id, user_id=user_id)
+            log(f"[JOINREQ] approved {user_id} -> {group_id}")
+        else:
+            await context.bot.decline_chat_join_request(chat_id=group_id, user_id=user_id)
+            log(f"[JOINREQ] declined {user_id} -> {group_id} (no active sub)")
+    except Exception as e:
+        log(f"[JOINREQ] error for {user_id}/{group_id}: {e}")
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id  = update.effective_user.id
     username = update.effective_user.username or update.effective_user.first_name
 
-    # No deep-link payload → simple greeting.
+    # No deep-link payload → try to recover access for an existing subscriber.
     if not context.args:
-        await update.message.reply_text(
-            "<b>Welcome!</b>\n\n"
-            "Use the access link you received to activate your subscription.\n\n"
-            f"Need help? Contact {get_support_contact()}",
-            parse_mode="HTML"
-        )
+        await _recover_access(update, context)
         return
 
     parsed = parse_start_param(context.args[0])

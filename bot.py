@@ -1,4 +1,7 @@
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler, MessageHandler,
+    ChatJoinRequestHandler, filters,
+)
 from Handlers.config import TOKEN
 from Handlers.db import init_schema, db_get_setting
 from Handlers.subscription import (
@@ -8,6 +11,7 @@ from Handlers.subscription import (
     get_chat_info_command,
     get_details_command,
     log_user_join,
+    handle_join_request,
     check_subscription_expiry,
 )
 from Handlers.admin import handle_expiry_callback
@@ -15,7 +19,7 @@ from Handlers.backup import backup_data_files, setallfiles_command
 from pytz import timezone
 import datetime
 
-ALLOWED_UPDATES = ["message", "callback_query", "chat_member"]
+ALLOWED_UPDATES = ["message", "callback_query", "chat_member", "chat_join_request"]
 
 EXPIRY_JOB_NAME = "expiry_check"
 DEFAULT_EXPIRY_TIME = "08:00"   # IST, used if the DB setting is missing/invalid
@@ -68,6 +72,9 @@ def build_application() -> Application:
 
     # ── Expiry Save / Remove buttons (posted into the admin group) ──
     application.add_handler(CallbackQueryHandler(handle_expiry_callback, pattern="^exp_"))
+
+    # ── Rejoin/recovery join requests — approve only active subscribers ──
+    application.add_handler(ChatJoinRequestHandler(handle_join_request))
 
     # ── New chat members (console log) ──
     application.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, log_user_join))
