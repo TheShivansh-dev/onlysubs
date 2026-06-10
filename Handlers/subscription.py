@@ -24,6 +24,10 @@ from .db import (
     db_remove_paid_user,
     db_get_active_subs_by_userid,
     db_get_courses_by_group_id,
+    db_add_log,
+    db_clear_logs,
+    db_get_setting,
+    db_set_setting,
 )
 import html
 import uuid
@@ -558,7 +562,59 @@ async def kick_and_deactivate(context: ContextTypes.DEFAULT_TYPE, kind: str, use
         db_remove_registered_user(user_id, str(datetime.now().date()))
     else:
         db_remove_paid_user(user_id)
+    # Record the outcome so it's visible on the panel Logs page.
+    try:
+        if kicked:
+            db_add_log("system", "expiry_remove", f"userid={user_id} group={group_id}")
+        else:
+            reason = "no group_id (course/group not set)" if not group_id else \
+                     "kick failed (bot not admin, or user is the group owner)"
+            db_add_log("system", "expiry_remove_failed", f"userid={user_id} group={group_id} — {reason}")
+    except Exception:
+        pass
     return kicked
+
+
+async def _notify_removal_failed(context: ContextTypes.DEFAULT_TYPE,
+                                 admin_group, user_id: int, course_name: str):
+    """Tell the admin group when an expired user couldn't be auto-removed."""
+    try:
+        await context.bot.send_message(
+            chat_id=admin_group,
+            text=(
+                "⚠️ <b>Auto-removal failed</b>\n\n"
+                f"User ID: <code>{user_id}</code>\n"
+                f"Course: {html.escape(str(course_name))}\n\n"
+                "They were marked expired but could NOT be removed from the group. "
+                "Check that the bot is an admin there (with 'Ban users') and that "
+                "the user isn't the group owner — then remove them manually."
+            ),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        log(f"[EXPIRY] could not post removal-failure note for {user_id}: {e}")
+
+
+async def _maybe_clear_logs():
+    """
+    Wipe the audit log every 2nd day, tied to the daily expiry run. Tracks the
+    last clear date in bot_settings so it fires at most once per 2 days.
+    """
+    try:
+        today = datetime.now().date()
+        last_raw = db_get_setting("LAST_LOG_CLEAR", "")
+        last = None
+        if last_raw:
+            try:
+                last = datetime.strptime(last_raw, "%Y-%m-%d").date()
+            except ValueError:
+                last = None
+        if last is None or (today - last).days >= 2:
+            n = db_clear_logs()
+            db_set_setting("LAST_LOG_CLEAR", str(today))
+            log(f"[LOGS] cleared {n} audit log rows (every-2nd-day housekeeping)")
+    except Exception as e:
+        log(f"[LOGS] auto-clear failed: {e}")
 
 
 async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
@@ -587,7 +643,9 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
                 await _post_expiry_card(context, admin_group, "r", user_id,
                                         row.get('username', ''), row.get('plan_type', ''), end_date)
             elif days <= 0:
-                await kick_and_deactivate(context, "r", user_id)
+                kicked = await kick_and_deactivate(context, "r", user_id)
+                if not kicked and admin_group:
+                    await _notify_removal_failed(context, admin_group, user_id, row.get('plan_type', ''))
                 await _notify_user(context, user_id,
                     "<b>Subscription Expired</b>\n\n"
                     "You have been removed from the group.\n"
@@ -619,10 +677,15 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
                 await _post_expiry_card(context, admin_group, "p", user_id,
                                         row.get('username', ''), row.get('course', ''), end_date)
             elif days <= 0:
-                await kick_and_deactivate(context, "p", user_id)
+                kicked = await kick_and_deactivate(context, "p", user_id)
+                if not kicked and admin_group:
+                    await _notify_removal_failed(context, admin_group, user_id, row.get('course', ''))
                 await _notify_user(context, user_id,
                     "<b>Subscription Expired</b>\n\n"
                     "You have been removed from the group.\n"
                     f"To rejoin, renew your subscription — contact {get_support_contact()}")
         except Exception as e:
             log(f"[EXPIRY] Error on paid user {user_id}: {e}")
+
+    # ── 3) Housekeeping: wipe the audit log every 2nd day at this run ──
+    await _maybe_clear_logs()

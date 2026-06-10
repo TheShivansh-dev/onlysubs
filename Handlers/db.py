@@ -880,3 +880,20 @@ def db_get_logs(limit: int = 200) -> list[dict]:
             )
             rows = cur.fetchall()
     return [{"id": r[0], "ts": str(r[1]), "actor": r[2], "action": r[3], "detail": r[4]} for r in rows]
+
+
+def db_clear_logs() -> int:
+    """Delete all audit logs. Returns how many rows were removed."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM audit_logs")
+            return cur.rowcount
+
+
+def db_get_owner_usernames() -> list[str]:
+    """All account usernames whose role is owner (their logs are owner-only)."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT username FROM admin_panel_users WHERE role='owner'")
+            rows = cur.fetchall()
+    return [r[0] for r in rows]

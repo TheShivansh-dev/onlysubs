@@ -49,6 +49,7 @@ from Handlers.db import (
     db_remove_admin_group,
     db_add_log,
     db_get_logs,
+    db_get_owner_usernames,
 )
 from Handlers.config import make_course_code
 
@@ -623,6 +624,8 @@ _HIDDEN_SETTINGS = {
     "ADMIN_GROUP_ID", "ADMIN_USER_ID",
     # Managed via the owner-only Expiry Scheduler card, not the raw settings table.
     "EXPIRY_CHECK_TIME",
+    # Internal bookkeeping for the every-2nd-day log wipe.
+    "LAST_LOG_CLEAR",
 }
 
 @app.get("/api/settings")
@@ -686,4 +689,9 @@ async def send_reminders(body: ReminderBody, current: dict = Depends(_get_curren
 
 @app.get("/api/logs")
 def get_logs(sa: dict = Depends(_require_manager)):
-    return db_get_logs(300)
+    logs = db_get_logs(300)
+    # Owner activity is private — superadmin/admin never see owner log entries.
+    if sa["role"] != "owner":
+        owners = set(db_get_owner_usernames())
+        logs = [l for l in logs if l.get("actor") not in owners]
+    return logs
