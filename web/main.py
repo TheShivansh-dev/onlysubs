@@ -153,8 +153,8 @@ def _get_current_user(token: str = Depends(oauth2)) -> dict:
     user = db_get_admin_user(username)
     if not user:
         raise credentials_exc
-    # Trust the DB role over the (possibly stale) token role.
-    return {"username": username, "role": user["role"]}
+    # Trust the DB row over the token (role + canonical-case username).
+    return {"username": user["username"], "role": user["role"]}
 
 
 def _require_manager(current: dict = Depends(_get_current_user)) -> dict:
@@ -189,8 +189,9 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
         )
-    token = _create_token(form.username, user["role"])
-    db_add_log(form.username, "login", user["role"])
+    # Use the canonical stored username so case typed at login doesn't matter.
+    token = _create_token(user["username"], user["role"])
+    db_add_log(user["username"], "login", user["role"])
     return {"access_token": token, "token_type": "bearer", "role": user["role"]}
 
 
@@ -442,7 +443,7 @@ def _assert_can_manage(actor: dict, target_username: str) -> dict:
 
 @app.delete("/api/admins/{username}")
 def remove_admin(username: str, sa: dict = Depends(_require_manager)):
-    if username == sa["username"]:
+    if username.lower() == sa["username"].lower():
         raise HTTPException(400, "Cannot remove yourself")
     _assert_can_manage(sa, username)
     removed = db_remove_admin_user(username)
@@ -481,7 +482,7 @@ class EditAccountBody(BaseModel):
 @app.put("/api/accounts/{username}")
 def edit_account(username: str, body: EditAccountBody,
                  sa: dict = Depends(_require_manager)):
-    if username == sa["username"]:
+    if username.lower() == sa["username"].lower():
         raise HTTPException(403, "You cannot edit your own account here")
     target = _assert_can_manage(sa, username)   # enforces the role hierarchy
 

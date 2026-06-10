@@ -722,12 +722,13 @@ def db_save_invite_link(link_id: str, user_id: int, invite_link: str):
 # ─────────────────────────────────────────────
 
 def db_get_admin_user(username: str) -> Optional[dict]:
+    """Look up an account by login email/username, case-insensitively."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, username, password_hash, role, tg_id "
-                "FROM admin_panel_users WHERE username=%s",
-                (username,),
+                "FROM admin_panel_users WHERE LOWER(username)=LOWER(%s)",
+                (username or "",),
             )
             row = cur.fetchone()
     if not row:
