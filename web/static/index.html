@@ -182,6 +182,45 @@
     .toast-msg.success { border-left: 4px solid #22c55e; }
     .toast-msg.error   { border-left: 4px solid #ef4444; }
     @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+    /* ── Mobile hamburger + off-canvas sidebar ── */
+    .menu-toggle {
+      display: none;
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      line-height: 1;
+      color: #1a1d23;
+      margin-right: .75rem;
+      padding: .15rem .35rem;
+      cursor: pointer;
+    }
+    .sidebar { transition: transform .25s ease; }
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.45);
+      z-index: 99;
+    }
+
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); z-index: 1050; }
+      .sidebar.open { transform: translateX(0); box-shadow: 0 0 24px rgba(0,0,0,.4); }
+      .sidebar-backdrop.show { display: block; z-index: 1040; }
+      .topbar { left: 0; padding: 0 1rem; }
+      .main-content { margin-left: 0; padding: 1rem; }
+      .menu-toggle { display: inline-flex; align-items: center; }
+
+      /* Cards / headers stack and breathe */
+      .section-card .sc-header { flex-wrap: wrap; gap: .5rem; }
+      .search-box { max-width: 100%; }
+      .login-card { width: 92vw; padding: 1.75rem; }
+      #toast-container { left: 1rem; right: 1rem; bottom: 1rem; }
+
+      /* Wide tables scroll horizontally instead of breaking the layout */
+      table.table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+    }
   </style>
 </head>
 <body>
@@ -227,8 +266,12 @@
     </div>
   </aside>
 
+  <!-- Backdrop shown behind the sidebar on mobile -->
+  <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
   <!-- Topbar -->
   <div class="topbar">
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><i class="bi bi-list"></i></button>
     <h5 id="topbar-title">Dashboard</h5>
   </div>
 
@@ -906,8 +949,23 @@ document.querySelectorAll('.sidebar nav .nav-link').forEach(link => {
   link.addEventListener('click', e => {
     e.preventDefault();
     switchTab(link.dataset.tab);
+    closeSidebar();   // collapse the menu after navigating on mobile
   });
 });
+
+// ── Mobile sidebar toggle ──
+function openSidebar() {
+  document.querySelector('.sidebar').classList.add('open');
+  document.getElementById('sidebar-backdrop').classList.add('show');
+}
+function closeSidebar() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.getElementById('sidebar-backdrop').classList.remove('show');
+}
+document.getElementById('menu-toggle').addEventListener('click', () => {
+  document.querySelector('.sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
+});
+document.getElementById('sidebar-backdrop').addEventListener('click', closeSidebar);
 
 // ══════════════════════════════════════════════════════════════
 //  Dashboard
