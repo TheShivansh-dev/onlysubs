@@ -70,6 +70,17 @@ async def _make_member_invite(context: ContextTypes.DEFAULT_TYPE,
         return course.get('group_link') or None
 
 
+async def _revoke_invite(context: ContextTypes.DEFAULT_TYPE, group_id, link_url: str):
+    """Revoke a used invite link so it is fully expired and can never be reused."""
+    if not group_id or not link_url:
+        return
+    try:
+        await context.bot.revoke_chat_invite_link(chat_id=int(group_id), invite_link=link_url)
+        log(f"[LINK] revoked used invite link in {group_id}")
+    except Exception as e:
+        log(f"[LINK] could not revoke invite link in {group_id}: {e}")
+
+
 async def _make_claim_invite(context: ContextTypes.DEFAULT_TYPE,
                              course: dict, unique_id: str, months: int) -> str | None:
     """
@@ -216,6 +227,9 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 log(f"[REJOIN] re-activated subscriber {user.id} on join to {group_id}")
         except Exception as e:
             log(f"[REJOIN] reactivate failed for {user.id}: {e}")
+        # A bot-issued rejoin link is single-use → revoke it now it's been used.
+        if link_name.startswith("rj_") and invite:
+            await _revoke_invite(context, group_id, invite.invite_link)
         return
 
     try:
@@ -250,6 +264,14 @@ async def handle_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception as e:
         log(f"[CLAIM] could not record link->user map: {e}")
     claim_link(unique_id, user.id)   # bind + consume the UniqueId now
+    # The claim link is single-use → revoke it so it's fully expired, and clear
+    # the stored pending link so it can never be handed out again.
+    if invite:
+        await _revoke_invite(context, group_id, invite.invite_link)
+    try:
+        set_pending_link(unique_id, "")
+    except Exception:
+        pass
     log(f"[CLAIM] uid={unique_id} bound to joiner {user.id} "
         f"course={course_name} ({months}m) expires={end_date}")
 
@@ -567,21 +589,27 @@ async def kick_user(context: ContextTypes.DEFAULT_TYPE, group_id, user_id: int) 
 
 
 async def kick_and_deactivate(context: ContextTypes.DEFAULT_TYPE, kind: str, user_id: int) -> bool:
-    """Remove a user from their group and mark them inactive in the DB."""
+    """
+    Remove a user from their group and, ONLY if the kick succeeded, mark them
+    inactive in the DB. If the kick fails the row stays active so the next run
+    retries it (and the admin still sees them) — we never falsely mark someone
+    removed while they're still sitting in the group.
+    """
     group_id = resolve_group_id(kind, user_id)
     kicked   = await kick_user(context, group_id, user_id)
-    if kind == "r":
-        db_remove_registered_user(user_id, str(datetime.now().date()))
-    else:
-        db_remove_paid_user(user_id)
-    # Record the outcome so it's visible on the panel Logs page.
     try:
         if kicked:
+            if kind == "r":
+                db_remove_registered_user(user_id, str(datetime.now().date()))
+            else:
+                db_remove_paid_user(user_id)
             db_add_log("system", "expiry_remove", f"userid={user_id} group={group_id}")
         else:
             reason = "no group_id (course/group not set)" if not group_id else \
-                     "kick failed (bot not admin, or user is the group owner)"
-            db_add_log("system", "expiry_remove_failed", f"userid={user_id} group={group_id} — {reason}")
+                     "kick failed — see the kick_error log above (bot's Ban-users right, " \
+                     "user is an admin/owner, or wrong group_id)"
+            db_add_log("system", "expiry_remove_failed",
+                       f"userid={user_id} group={group_id} — {reason}")
     except Exception:
         pass
     return kicked
@@ -633,6 +661,9 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
     today       = datetime.now().date()
     admin_group = get_admin_group_id()
 
+    # Housekeeping first, so this run's own diagnostics survive the wipe.
+    await _maybe_clear_logs()
+
     # ── 1) Auto-registered users (deep-link flow) ──
     try:
         active_users = db_get_active_registered_users()
@@ -656,12 +687,13 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
                                         row.get('username', ''), row.get('plan_type', ''), end_date)
             elif days <= 0:
                 kicked = await kick_and_deactivate(context, "r", user_id)
-                if not kicked and admin_group:
+                if kicked:
+                    await _notify_user(context, user_id,
+                        "<b>Subscription Expired</b>\n\n"
+                        "You have been removed from the group.\n"
+                        f"To rejoin, renew your subscription — contact {get_support_contact()}")
+                elif admin_group:
                     await _notify_removal_failed(context, admin_group, user_id, row.get('plan_type', ''))
-                await _notify_user(context, user_id,
-                    "<b>Subscription Expired</b>\n\n"
-                    "You have been removed from the group.\n"
-                    f"To rejoin, renew your subscription — contact {get_support_contact()}")
         except Exception as e:
             log(f"[EXPIRY] Error on registered user {user_id}: {e}")
 
@@ -690,14 +722,12 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
                                         row.get('username', ''), row.get('course', ''), end_date)
             elif days <= 0:
                 kicked = await kick_and_deactivate(context, "p", user_id)
-                if not kicked and admin_group:
+                if kicked:
+                    await _notify_user(context, user_id,
+                        "<b>Subscription Expired</b>\n\n"
+                        "You have been removed from the group.\n"
+                        f"To rejoin, renew your subscription — contact {get_support_contact()}")
+                elif admin_group:
                     await _notify_removal_failed(context, admin_group, user_id, row.get('course', ''))
-                await _notify_user(context, user_id,
-                    "<b>Subscription Expired</b>\n\n"
-                    "You have been removed from the group.\n"
-                    f"To rejoin, renew your subscription — contact {get_support_contact()}")
         except Exception as e:
             log(f"[EXPIRY] Error on paid user {user_id}: {e}")
-
-    # ── 3) Housekeeping: wipe the audit log every 2nd day at this run ──
-    await _maybe_clear_logs()
