@@ -193,12 +193,12 @@ _COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id"]
 
 
 def db_load_courses() -> pd.DataFrame:
-    """Return courses table as a DataFrame."""
+    """Return ACTIVE courses as a DataFrame (deactivated courses are hidden)."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT id, course_name, course_code, group_link, group_id "
-                "FROM courses ORDER BY id"
+                "FROM courses WHERE COALESCE(is_active, 1) = 1 ORDER BY id"
             )
             rows = cur.fetchall()
     if not rows:
@@ -208,7 +208,10 @@ def db_load_courses() -> pd.DataFrame:
 
 def db_save_course(course_name: str, course_code: str = "",
                    group_link: str = "", group_id: Optional[int] = None):
-    """Insert a new course (or update group info if the code already exists)."""
+    """Insert a new course (or update group info if the code already exists).
+
+    Re-adding a previously deactivated course reactivates it.
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
             if course_code:
@@ -221,22 +224,28 @@ def db_save_course(course_name: str, course_code: str = "",
                 existing = None
             if existing:
                 cur.execute(
-                    "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s WHERE id=%s",
+                    "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
+                    "is_active=1 WHERE id=%s",
                     (course_name, group_link, group_id, existing[0]),
                 )
             else:
                 cur.execute(
-                    "INSERT INTO courses (course_name, course_code, group_link, group_id) "
-                    "VALUES (%s, %s, %s, %s)",
+                    "INSERT INTO courses (course_name, course_code, group_link, group_id, is_active) "
+                    "VALUES (%s, %s, %s, %s, 1)",
                     (course_name, course_code, group_link, group_id),
                 )
 
 
 def db_delete_course(course_id: int):
-    """Delete a course by id."""
+    """
+    Soft-delete a course: mark it inactive instead of removing the row, so any
+    existing subscribers keep their course -> group mapping (no id issues). The
+    course stops appearing in the panel/dropdowns but bot lookups still resolve
+    it for current members (rejoin, expiry, kick).
+    """
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM courses WHERE id=%s", (course_id,))
+            cur.execute("UPDATE courses SET is_active=0 WHERE id=%s", (course_id,))
 
 
 def db_get_course_by_code(course_code: str) -> Optional[dict]:

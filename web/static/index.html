@@ -1178,7 +1178,7 @@ async function loadCourses() {
       <td>${escHtml(c.course_name)}</td>
       <td><code>${escHtml(c.course_code || '–')}</code></td>
       <td class="small text-truncate" style="max-width:220px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
-      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Delete</button></td>
+      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Deactivate</button></td>
     </tr>`).join('');
 }
 
@@ -1207,9 +1207,9 @@ document.getElementById('add-course-form').addEventListener('submit', async e =>
 });
 
 async function deleteCourse(id) {
-  if (!confirm('Delete this course?')) return;
+  if (!confirm('Deactivate this course? Existing subscribers keep working; it just stops showing here.')) return;
   const res = await apiFetch(`/api/courses/${id}`, { method: 'DELETE' });
-  if (res && res.ok) { toast('Course deleted'); loadCourses(); }
+  if (res && res.ok) { toast('Course deactivated'); loadCourses(); }
   else toast('Failed', 'error');
 }
 

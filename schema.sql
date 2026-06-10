@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS courses (
     course_name VARCHAR(200) NOT NULL,
     course_code VARCHAR(50),
     group_link  TEXT,
-    group_id    BIGINT
+    group_id    BIGINT,
+    is_active   SMALLINT DEFAULT 1
 );
 
 -- Safe migrations for an existing courses table
@@ -81,6 +82,12 @@ EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 DO $$ BEGIN
   ALTER TABLE courses ADD COLUMN group_id BIGINT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+-- Soft-delete flag: deleting a course only deactivates it so existing
+-- subscribers keep their course -> group mapping (no id/reflection issues).
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN is_active SMALLINT DEFAULT 1;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
 

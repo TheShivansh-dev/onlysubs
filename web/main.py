@@ -225,7 +225,7 @@ def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)
 @app.delete("/api/courses/{course_id}")
 def delete_course(course_id: int, current_user: dict = Depends(_get_current_user)):
     db_delete_course(course_id)
-    db_add_log(current_user["username"], "course_delete", f"id={course_id}")
+    db_add_log(current_user["username"], "course_deactivate", f"id={course_id}")
     return {"ok": True}
 
 
