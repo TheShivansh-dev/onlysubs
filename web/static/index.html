@@ -466,14 +466,11 @@
               <p class="small text-muted mb-1">Role: <strong id="me-role">–</strong></p>
               <p class="small text-muted">Telegram ID: <strong id="me-tg">–</strong></p>
               <hr>
-              <form id="me-email-form" class="mb-3">
+              <div class="mb-3">
                 <label class="form-label small fw-semibold">Login Email</label>
-                <div class="input-group input-group-sm">
-                  <input id="me-email" type="email" class="form-control" required />
-                  <button class="btn btn-primary" type="submit">Update Email</button>
-                </div>
-                <div class="form-text">Changing your email logs you out — sign in again with the new one.</div>
-              </form>
+                <input id="me-email" type="email" class="form-control form-control-sm" disabled />
+                <div class="form-text">Your login email can only be changed by an admin above you.</div>
+              </div>
               <form id="me-pass-form">
                 <label class="form-label small fw-semibold">New Password</label>
                 <div class="input-group input-group-sm">
@@ -719,7 +716,7 @@
               <label class="form-label small">Email</label>
               <input type="email" class="form-control form-control-sm" id="ea-email" required />
             </div>
-            <div class="col-12">
+            <div class="col-12" id="ea-role-wrap">
               <label class="form-label small">Role</label>
               <select class="form-select form-select-sm" id="ea-role">
                 <option value="admin">admin</option>
@@ -1251,7 +1248,7 @@ async function loadAdmins() {
         </div>
       </td>
       <td>
-        ${getRole() === 'owner' ? `<button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="ownerEditAccount('${escHtml(a.username)}')">Edit</button>` : ''}
+        ${isManager() ? `<button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="ownerEditAccount('${escHtml(a.username)}')">Edit</button>` : ''}
         <button class="btn btn-danger btn-sm py-0 px-2" onclick="removeAdmin('${escHtml(a.username)}')">Remove</button>
       </td>
     </tr>`).join('');
@@ -1287,19 +1284,6 @@ async function loadProfile() {
   document.getElementById('me-tg').textContent   = me.tg_id != null ? me.tg_id : '–';
   document.getElementById('me-email').value      = me.username || '';
 }
-
-document.getElementById('me-email-form').addEventListener('submit', async e => {
-  e.preventDefault();
-  const new_email = document.getElementById('me-email').value.trim();
-  const res = await apiFetch('/api/me/email', { method: 'PUT', body: JSON.stringify({ new_email }) });
-  if (res && res.ok) {
-    toast('Email updated — please sign in again');
-    setTimeout(logout, 1200);
-  } else {
-    const d = res ? await res.json().catch(() => ({})) : {};
-    toast(d.detail || 'Failed to update email', 'error');
-  }
-});
 
 document.getElementById('me-pass-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -1555,6 +1539,8 @@ function ownerEditAccount(username) {
   document.getElementById('ea-email').value = username;   // username is the login email
   document.getElementById('ea-role').value  = (a && a.role) || 'admin';
   document.getElementById('ea-password').value = '';
+  // Only the owner may change roles.
+  document.getElementById('ea-role-wrap').style.display = getRole() === 'owner' ? '' : 'none';
   bootstrap.Modal.getOrCreateInstance(document.getElementById('editAccountModal')).show();
 }
 
@@ -1566,9 +1552,9 @@ document.getElementById('edit-account-form').addEventListener('submit', async e 
   const newPass = document.getElementById('ea-password').value.trim();
   const body = {};
   if (email && email !== orig) body.email = email;
-  body.role = role;                          // always send chosen role
+  if (getRole() === 'owner') body.role = role;   // role change is owner-only
   if (newPass) body.new_password = newPass;
-  const res = await apiFetch(`/api/owner/accounts/${encodeURIComponent(orig)}`, {
+  const res = await apiFetch(`/api/accounts/${encodeURIComponent(orig)}`, {
     method: 'PUT', body: JSON.stringify(body),
   });
   if (res && res.ok) {

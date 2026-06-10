@@ -467,26 +467,29 @@ def change_password(username: str, body: ChangePasswordBody,
     return {"ok": True}
 
 
-# ── Owner-only account editing (email / role) ─────────────────────────────────
-#  Everything except the Telegram id and joined date may be changed here.
+# ── Account editing by a manager (email / password / role) ────────────────────
+#  A manager edits accounts BELOW them (owner → superadmin+admin,
+#  superadmin → admin). Nobody can edit their OWN account here (and so nobody can
+#  change their own email). Role changes are owner-only.
 
-class OwnerEditAccountBody(BaseModel):
+class EditAccountBody(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
     new_password: Optional[str] = None
 
 
-@app.put("/api/owner/accounts/{username}")
-def owner_edit_account(username: str, body: OwnerEditAccountBody,
-                       owner: dict = Depends(_require_owner)):
-    target = db_get_admin_user(username)
-    if not target:
-        raise HTTPException(404, "Account not found")
-    if target["role"] == "owner":
-        raise HTTPException(403, "The owner account cannot be edited here")
+@app.put("/api/accounts/{username}")
+def edit_account(username: str, body: EditAccountBody,
+                 sa: dict = Depends(_require_manager)):
+    if username == sa["username"]:
+        raise HTTPException(403, "You cannot edit your own account here")
+    target = _assert_can_manage(sa, username)   # enforces the role hierarchy
 
     changes = []
+    # Role change is owner-only.
     if body.role and body.role in ("admin", "superadmin") and body.role != target["role"]:
+        if sa["role"] != "owner":
+            raise HTTPException(403, "Only the owner can change roles")
         db_set_admin_role(username, body.role)
         changes.append(f"role={body.role}")
     if body.new_password:
@@ -505,7 +508,7 @@ def owner_edit_account(username: str, body: OwnerEditAccountBody,
         final_name = new_email
         changes.append(f"email={new_email}")
 
-    db_add_log(owner["username"], "account_edit", f"{username} -> {', '.join(changes) or 'no change'}")
+    db_add_log(sa["username"], "account_edit", f"{username} -> {', '.join(changes) or 'no change'}")
     return {"ok": True, "username": final_name}
 
 
@@ -585,20 +588,9 @@ def change_my_password(body: MyPasswordBody, current: dict = Depends(_get_curren
     return {"ok": True}
 
 
-class MyEmailBody(BaseModel):
-    new_email: str
-
-
-@app.put("/api/me/email")
-def change_my_email(body: MyEmailBody, current: dict = Depends(_get_current_user)):
-    new_email = body.new_email.strip()
-    if not new_email or "@" not in new_email:
-        raise HTTPException(400, "A valid email is required")
-    ok = db_update_admin_username(current["username"], new_email)
-    if not ok:
-        raise HTTPException(400, "That email is already in use")
-    # Login name changed → the current token is now stale; client must re-login.
-    return {"ok": True, "relogin": True}
+# Note: there is deliberately no self email-change endpoint — a login email can
+# only be changed by a manager above the account (owner/superadmin), never by the
+# account itself.
 
 
 # ── Bot Settings  (SuperAdmin only) ───────────────────────────────────────────
