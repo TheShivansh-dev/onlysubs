@@ -245,30 +245,17 @@ def list_users(current_user: dict = Depends(_get_current_user)):
 
 async def _kick_from_group(kind: str, user_id: int) -> bool:
     """
-    Kick a user out of their course group via the running bot — WITHOUT
-    leaving them banned. Telegram's only removal API is ban_chat_member, so we
-    remove them and IMMEDIATELY unban (in a finally) so they're never banned and
-    can rejoin later on a new subscription.
+    Kick a user out of their course group via the running bot, reusing the same
+    kick_user() the daily expiry job uses (ban then immediate unban — never left
+    banned). On failure kick_user writes the exact Telegram reason to the Logs.
     """
     if _bot_app is None:
         return False
-    from Handlers.subscription import resolve_group_id
+    from Handlers.subscription import resolve_group_id, kick_user
     group_id = resolve_group_id(kind, user_id)
     if not group_id:
         return False
-    try:
-        await _bot_app.bot.ban_chat_member(chat_id=int(group_id), user_id=user_id)
-        return True
-    except Exception as e:
-        print(f"[KICK] could not remove {user_id} from {group_id}: {e}")
-        return False
-    finally:
-        # Always lift the ban so the user is never left blocked.
-        try:
-            await _bot_app.bot.unban_chat_member(
-                chat_id=int(group_id), user_id=user_id, only_if_banned=True)
-        except Exception as e:
-            print(f"[KICK] could not unban {user_id} from {group_id}: {e}")
+    return await kick_user(_RunCtx(_bot_app.bot), group_id, user_id)
 
 
 @app.delete("/api/users/{user_id}")

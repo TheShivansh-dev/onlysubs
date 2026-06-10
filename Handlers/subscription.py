@@ -538,20 +538,32 @@ async def kick_user(context: ContextTypes.DEFAULT_TYPE, group_id, user_id: int) 
     if not group_id:
         log(f"[KICK] No group_id for user {user_id}; skipping removal")
         return False
+    banned = False
     try:
         await context.bot.ban_chat_member(chat_id=int(group_id), user_id=user_id)
+        banned = True
         log(f"[KICK] Removed user {user_id} from group {group_id}")
         return True
     except Exception as e:
+        # Surface the EXACT Telegram reason on the panel Logs page. Common ones:
+        #   "not enough rights"        → bot's "Ban users" admin toggle is off
+        #   "user is an administrator" → can't kick an admin (demote them first)
+        #   can't kick the group owner → the creator can never be removed
+        #   "chat not found"           → wrong group_id on the course
         log(f"[KICK] Could not remove user {user_id} from {group_id}: {e}")
+        try:
+            db_add_log("system", "kick_error", f"userid={user_id} group={group_id}: {e}")
+        except Exception:
+            pass
         return False
     finally:
-        # Always lift the ban so the user is never left blocked.
-        try:
-            await context.bot.unban_chat_member(
-                chat_id=int(group_id), user_id=user_id, only_if_banned=True)
-        except Exception as e:
-            log(f"[KICK] Could not unban user {user_id} from {group_id}: {e}")
+        # Lift the ban so the user is never left blocked — only if we banned them.
+        if banned:
+            try:
+                await context.bot.unban_chat_member(
+                    chat_id=int(group_id), user_id=user_id, only_if_banned=True)
+            except Exception as e:
+                log(f"[KICK] Could not unban user {user_id} from {group_id}: {e}")
 
 
 async def kick_and_deactivate(context: ContextTypes.DEFAULT_TYPE, kind: str, user_id: int) -> bool:
