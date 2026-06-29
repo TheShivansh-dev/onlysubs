@@ -249,7 +249,7 @@ class CourseBody(BaseModel):
     course_name: str
     group_link: Optional[str] = ""
     group_id: Optional[int] = None
-    assigned_admin: Optional[str] = None   # admin login email this course belongs to
+    assigned_admins: Optional[list] = None   # admin login emails managing this course
 
 
 @app.post("/api/courses", status_code=201)
@@ -258,23 +258,28 @@ def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)
     if not name:
         raise HTTPException(status_code=400, detail="course_name is required")
 
-    # Who the course is assigned to:
+    # Who manages the course:
     #  - a plain admin can only create courses for themselves;
-    #  - a manager may assign it to any existing admin account (or leave it open).
+    #  - a manager may assign it to any number of existing admin accounts.
     if current_user["role"] == "admin":
-        assigned = current_user["username"]
+        assigned_list = [current_user["username"]]
     else:
-        assigned = (body.assigned_admin or "").strip() or None
-        if assigned:
-            target = db_get_admin_user(assigned)
+        assigned_list = []
+        for a in (body.assigned_admins or []):
+            a = (a or "").strip()
+            if not a:
+                continue
+            target = db_get_admin_user(a)
             if not target or target["role"] != "admin":
-                raise HTTPException(400, "Assigned admin must be an existing admin account")
-            assigned = target["username"]   # canonical
+                raise HTTPException(400, f"'{a}' is not an existing admin account")
+            if target["username"] not in assigned_list:   # canonical, deduped
+                assigned_list.append(target["username"])
 
+    assigned = ",".join(assigned_list) if assigned_list else None
     db_save_course(name, make_course_code(name), (body.group_link or "").strip(),
                    body.group_id, assigned_admin=assigned)
     db_add_log(current_user["username"], "course_add",
-               f"{name}" + (f" → admin {assigned}" if assigned else ""))
+               f"{name}" + (f" → admins: {assigned}" if assigned else ""))
     return {"ok": True, "course_code": make_course_code(name)}
 
 

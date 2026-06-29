@@ -297,29 +297,47 @@ def db_get_courses_by_group_id(group_id: int) -> list[dict]:
     return [dict(zip(_COURSE_COLS, r)) for r in rows]
 
 
+def _parse_course_admins(raw) -> list[str]:
+    """assigned_admin holds a comma-separated list of admin login emails."""
+    if not raw:
+        return []
+    return [a.strip() for a in str(raw).split(",") if a.strip()]
+
+
 def db_get_courses_for_admin(username: str) -> list[dict]:
-    """Active courses assigned to a given admin (login email), case-insensitive."""
+    """Active courses this admin (login email) is one of the assignees of."""
+    uname = (username or "").strip().lower()
+    if not uname:
+        return []
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_COURSE_SELECT} FROM courses "
-                "WHERE COALESCE(is_active,1)=1 AND LOWER(assigned_admin)=LOWER(%s) ORDER BY id",
-                (username or "",),
+                "WHERE COALESCE(is_active,1)=1 ORDER BY id"
             )
             rows = cur.fetchall()
-    return [dict(zip(_COURSE_COLS, r)) for r in rows]
+    out = []
+    for r in rows:
+        c = dict(zip(_COURSE_COLS, r))
+        if uname in [a.lower() for a in _parse_course_admins(c.get("assigned_admin"))]:
+            out.append(c)
+    return out
 
 
 def db_get_admin_course_names(username: str) -> set:
-    """All course names assigned to this admin (active or not), for scoping."""
+    """All course names this admin is assigned to (active or not), for scoping."""
+    uname = (username or "").strip().lower()
+    if not uname:
+        return set()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT course_name FROM courses WHERE LOWER(assigned_admin)=LOWER(%s)",
-                (username or "",),
-            )
+            cur.execute("SELECT course_name, assigned_admin FROM courses")
             rows = cur.fetchall()
-    return {r[0] for r in rows if r[0]}
+    names = set()
+    for cname, assigned in rows:
+        if cname and uname in [a.lower() for a in _parse_course_admins(assigned)]:
+            names.add(cname)
+    return names
 
 
 def db_get_active_subs_by_userid(user_id: int) -> list[dict]:

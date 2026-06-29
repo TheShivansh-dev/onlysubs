@@ -424,7 +424,7 @@
             <div class="sc-header"><h6><i class="bi bi-book-fill me-2"></i>Courses</h6></div>
             <div class="sc-body p-0">
               <table class="table table-hover mb-0" id="courses-table">
-                <thead><tr><th>#</th><th>Course Name</th><th>Code</th><th>Assigned Admin</th><th>Group Link</th><th></th></tr></thead>
+                <thead><tr><th>#</th><th>Course Name</th><th>Code</th><th>Assigned Admins</th><th>Group Link</th><th></th></tr></thead>
                 <tbody id="courses-tbody"></tbody>
               </table>
             </div>
@@ -450,11 +450,9 @@
                   <input type="text" class="form-control form-control-sm" id="course-grouplink-input" placeholder="https://t.me/+abc123" />
                 </div>
                 <div class="mb-3 manager-only" id="course-admin-wrap" style="display:none">
-                  <label class="form-label small fw-semibold">Assign to Admin <span class="text-muted">(optional)</span></label>
-                  <select class="form-select form-select-sm" id="course-admin-select">
-                    <option value="">— no specific admin —</option>
-                  </select>
-                  <div class="form-text">That admin will only see/manage this course.</div>
+                  <label class="form-label small fw-semibold">Assign to Admins <span class="text-muted">(optional, pick one or more)</span></label>
+                  <select class="form-select form-select-sm" id="course-admin-select" multiple size="4"></select>
+                  <div class="form-text">Hold Ctrl/⌘ to select multiple. Selected admins see/manage only this course.</div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add Course</button>
               </form>
@@ -1240,7 +1238,7 @@ async function loadCourses() {
       <td class="text-muted">${i + 1}</td>
       <td>${escHtml(c.course_name)}</td>
       <td><code>${escHtml(c.course_code || '–')}</code></td>
-      <td class="small">${c.assigned_admin ? escHtml(c.assigned_admin) : '<span class="text-muted">–</span>'}</td>
+      <td class="small">${c.assigned_admin ? escHtml(c.assigned_admin.split(',').map(s => s.trim()).join(', ')) : '<span class="text-muted">–</span>'}</td>
       <td class="small text-truncate" style="max-width:200px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
       <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Deactivate</button></td>
     </tr>`).join('');
@@ -1255,8 +1253,9 @@ async function populateCourseAdminSelect() {
   const res = await apiFetch('/api/admins');
   if (!res || !res.ok) return;
   const admins = (await res.json()).filter(a => a.role === 'admin');
-  sel.innerHTML = '<option value="">— no specific admin —</option>' +
-    admins.map(a => `<option value="${escHtml(a.username)}">${escHtml(a.username)}</option>`).join('');
+  sel.innerHTML = admins.length
+    ? admins.map(a => `<option value="${escHtml(a.username)}">${escHtml(a.username)}</option>`).join('')
+    : '<option value="" disabled>No admin accounts yet</option>';
 }
 
 // Live course-code preview
@@ -1274,11 +1273,14 @@ document.getElementById('add-course-form').addEventListener('submit', async e =>
   if (!name) return;
   const groupId = document.getElementById('course-groupid-input').value;
   const adminSel = document.getElementById('course-admin-select');
+  const assignedAdmins = (isManager() && adminSel)
+    ? [...adminSel.selectedOptions].map(o => o.value).filter(Boolean)
+    : [];
   const body = {
     course_name: name,
     group_link:  document.getElementById('course-grouplink-input').value.trim(),
     group_id:    groupId ? parseInt(groupId) : null,
-    assigned_admin: (isManager() && adminSel) ? (adminSel.value || null) : null,
+    assigned_admins: assignedAdmins,
   };
   const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify(body) });
   if (res && res.ok) { toast('Course added'); e.target.reset(); document.getElementById('course-code-preview').textContent = ''; loadCourses(); }
