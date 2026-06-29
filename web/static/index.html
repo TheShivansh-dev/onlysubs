@@ -449,6 +449,11 @@
                   <label class="form-label small fw-semibold">Group Link <span class="text-muted">(optional fallback)</span></label>
                   <input type="text" class="form-control form-control-sm" id="course-grouplink-input" placeholder="https://t.me/+abc123" />
                 </div>
+                <div class="mb-2">
+                  <label class="form-label small fw-semibold">Course Website Link <span class="text-muted">(optional)</span></label>
+                  <input type="text" class="form-control form-control-sm" id="course-website-input" placeholder="https://yourcourse.com/renew" />
+                  <div class="form-text">Sent to users in expiry reminders so they can renew.</div>
+                </div>
                 <div class="mb-3 manager-only" id="course-admin-wrap" style="display:none">
                   <label class="form-label small fw-semibold">Assign to Admins <span class="text-muted">(optional, pick one or more)</span></label>
                   <select class="form-select form-select-sm" id="course-admin-select" multiple size="4"></select>
@@ -1281,6 +1286,7 @@ document.getElementById('add-course-form').addEventListener('submit', async e =>
     group_link:  document.getElementById('course-grouplink-input').value.trim(),
     group_id:    groupId ? parseInt(groupId) : null,
     assigned_admins: assignedAdmins,
+    website_url: document.getElementById('course-website-input').value.trim(),
   };
   const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify(body) });
   if (res && res.ok) { toast('Course added'); e.target.reset(); document.getElementById('course-code-preview').textContent = ''; loadCourses(); }

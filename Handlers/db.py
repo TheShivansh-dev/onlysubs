@@ -189,8 +189,10 @@ def db_get_all_groups() -> list[dict]:
 #  Courses
 # ─────────────────────────────────────────────
 
-_COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id", "assigned_admin"]
-_COURSE_SELECT = "id, course_name, course_code, group_link, group_id, assigned_admin"
+_COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id",
+                "assigned_admin", "website_url"]
+_COURSE_SELECT = ("id, course_name, course_code, group_link, group_id, "
+                  "assigned_admin, website_url")
 
 
 def db_load_courses() -> pd.DataFrame:
@@ -209,12 +211,13 @@ def db_load_courses() -> pd.DataFrame:
 
 def db_save_course(course_name: str, course_code: str = "",
                    group_link: str = "", group_id: Optional[int] = None,
-                   assigned_admin: Optional[str] = None):
+                   assigned_admin: Optional[str] = None,
+                   website_url: Optional[str] = None):
     """Insert a new course (or update group info if the code already exists).
 
-    Re-adding a previously deactivated course reactivates it. assigned_admin is
-    only written when provided (None on update keeps the existing assignment, so
-    syncing a course from the paid-user form never wipes it).
+    Re-adding a previously deactivated course reactivates it. assigned_admin and
+    website_url are only written when provided (None on update keeps the existing
+    value, so syncing a course from the paid-user form never wipes them).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -227,23 +230,20 @@ def db_save_course(course_name: str, course_code: str = "",
             else:
                 existing = None
             if existing:
-                if assigned_admin is None:
-                    cur.execute(
-                        "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
-                        "is_active=1 WHERE id=%s",
-                        (course_name, group_link, group_id, existing[0]),
-                    )
-                else:
-                    cur.execute(
-                        "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
-                        "is_active=1, assigned_admin=%s WHERE id=%s",
-                        (course_name, group_link, group_id, assigned_admin or None, existing[0]),
-                    )
+                sets = ["course_name=%s", "group_link=%s", "group_id=%s", "is_active=1"]
+                vals = [course_name, group_link, group_id]
+                if assigned_admin is not None:
+                    sets.append("assigned_admin=%s"); vals.append(assigned_admin or None)
+                if website_url is not None:
+                    sets.append("website_url=%s"); vals.append(website_url or None)
+                vals.append(existing[0])
+                cur.execute(f"UPDATE courses SET {', '.join(sets)} WHERE id=%s", vals)
             else:
                 cur.execute(
                     "INSERT INTO courses (course_name, course_code, group_link, group_id, "
-                    "is_active, assigned_admin) VALUES (%s, %s, %s, %s, 1, %s)",
-                    (course_name, course_code, group_link, group_id, assigned_admin or None),
+                    "is_active, assigned_admin, website_url) VALUES (%s, %s, %s, %s, 1, %s, %s)",
+                    (course_name, course_code, group_link, group_id,
+                     assigned_admin or None, website_url or None),
                 )
 
 
@@ -676,6 +676,34 @@ def db_get_stats() -> dict:
         "total_users": total_users,
         "total_courses": total_courses,
         "claimed_links": claimed_links,
+        "active_paid_users": active_paid,
+    }
+
+
+def db_get_stats_for_courses(course_names) -> dict:
+    """Dashboard stats limited to a given set of course names (for scoped admins)."""
+    names = [n for n in (course_names or []) if n]
+    if not names:
+        return {"active_users": 0, "total_users": 0, "total_courses": 0,
+                "claimed_links": 0, "active_paid_users": 0}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM registered_users "
+                        "WHERE isremoved=0 AND plan_type = ANY(%s)", (names,))
+            active_users = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM registered_users WHERE plan_type = ANY(%s)", (names,))
+            total_users = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM courses "
+                        "WHERE COALESCE(is_active,1)=1 AND course_name = ANY(%s)", (names,))
+            total_courses = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM paid_users "
+                        "WHERE is_active=1 AND course = ANY(%s)", (names,))
+            active_paid = cur.fetchone()[0]
+    return {
+        "active_users": active_users,
+        "total_users": total_users,
+        "total_courses": total_courses,
+        "claimed_links": 0,
         "active_paid_users": active_paid,
     }
 

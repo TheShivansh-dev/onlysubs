@@ -31,6 +31,7 @@ from Handlers.db import (
     db_set_admin_role,
     db_set_admin_tgid,
     db_get_stats,
+    db_get_stats_for_courses,
     db_load_courses,
     db_save_course,
     db_delete_course,
@@ -232,6 +233,10 @@ def login(form: OAuth2PasswordRequestForm = Depends()):
 # ── Stats ─────────────────────────────────────────────────────────────────────
 @app.get("/api/stats")
 def get_stats(current_user: dict = Depends(_get_current_user)):
+    # A scoped admin sees counts only for their assigned course(s).
+    allowed = _allowed_courses(current_user)
+    if allowed is not None:
+        return db_get_stats_for_courses(allowed)
     return db_get_stats()
 
 
@@ -250,6 +255,7 @@ class CourseBody(BaseModel):
     group_link: Optional[str] = ""
     group_id: Optional[int] = None
     assigned_admins: Optional[list] = None   # admin login emails managing this course
+    website_url: Optional[str] = ""          # optional course/renewal website link
 
 
 @app.post("/api/courses", status_code=201)
@@ -277,7 +283,8 @@ def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)
 
     assigned = ",".join(assigned_list) if assigned_list else None
     db_save_course(name, make_course_code(name), (body.group_link or "").strip(),
-                   body.group_id, assigned_admin=assigned)
+                   body.group_id, assigned_admin=assigned,
+                   website_url=((body.website_url or "").strip() or None))
     db_add_log(current_user["username"], "course_add",
                f"{name}" + (f" → admins: {assigned}" if assigned else ""))
     return {"ok": True, "course_code": make_course_code(name)}

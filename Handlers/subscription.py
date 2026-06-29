@@ -497,14 +497,26 @@ async def _notify_user(context: ContextTypes.DEFAULT_TYPE, user_id: int, text: s
         log(f"[NOTIFY] Could not message user {user_id}: {e}")
 
 
-def _renew_message(course_name: str, days: int) -> str:
-    """Reminder sent to the user 5 and 3 days before removal."""
-    return (
+def _course_website(course_name: str) -> str:
+    """Return the course's renewal website link (or '' if none set)."""
+    if not course_name:
+        return ""
+    course = get_course_by_name(str(course_name))
+    return (course.get('website_url') or '').strip() if course else ""
+
+
+def _renew_message(course_name: str, days: int, website_url: str = "") -> str:
+    """Reminder sent to the user 3 days, 2 days and 1 day (final) before removal."""
+    when = "in less than 24 hours" if days <= 1 else f"in <b>{days} days</b>"
+    msg = (
         f"<b>Subscription Expiring Soon!</b>\n\n"
-        f"Your <b>{html.escape(str(course_name))}</b> access expires in <b>{days} days</b>.\n\n"
+        f"Your <b>{html.escape(str(course_name))}</b> access expires {when}.\n\n"
         f"Please renew the same course to keep your access.\n"
-        f"To renew, contact {get_support_contact()}"
     )
+    if website_url:
+        msg += f"\n🔗 <b>Renew here:</b> {html.escape(website_url)}\n"
+    msg += f"\nTo renew, contact {get_support_contact()}"
+    return msg
 
 
 async def _post_expiry_card(context, admin_group, kind: str, user_id: int,
@@ -683,13 +695,18 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
             continue
         days = (end_date - today).days
         try:
-            if days == 5:
-                await _notify_user(context, user_id, _renew_message(row.get('plan_type', ''), 5))
-            elif days == 3:
-                await _notify_user(context, user_id, _renew_message(row.get('plan_type', ''), 3))
-            elif days == 1 and admin_group:
-                await _post_expiry_card(context, admin_group, "r", user_id,
-                                        row.get('username', ''), row.get('plan_type', ''), end_date)
+            if days in (3, 2):
+                cname = row.get('plan_type', '')
+                await _notify_user(context, user_id,
+                                   _renew_message(cname, days, _course_website(cname)))
+            elif days == 1:
+                # Final reminder to the user + Save/Remove card to the admin group.
+                cname = row.get('plan_type', '')
+                await _notify_user(context, user_id,
+                                   _renew_message(cname, 1, _course_website(cname)))
+                if admin_group:
+                    await _post_expiry_card(context, admin_group, "r", user_id,
+                                            row.get('username', ''), cname, end_date)
             elif days <= 0:
                 kicked = await kick_and_deactivate(context, "r", user_id)
                 if kicked:
@@ -718,13 +735,17 @@ async def check_subscription_expiry(context: ContextTypes.DEFAULT_TYPE):
             continue
         days = (end_date - today).days
         try:
-            if days == 5:
-                await _notify_user(context, user_id, _renew_message(row.get('course', ''), 5))
-            elif days == 3:
-                await _notify_user(context, user_id, _renew_message(row.get('course', ''), 3))
-            elif days == 1 and admin_group:
-                await _post_expiry_card(context, admin_group, "p", user_id,
-                                        row.get('username', ''), row.get('course', ''), end_date)
+            if days in (3, 2):
+                cname = row.get('course', '')
+                await _notify_user(context, user_id,
+                                   _renew_message(cname, days, _course_website(cname)))
+            elif days == 1:
+                cname = row.get('course', '')
+                await _notify_user(context, user_id,
+                                   _renew_message(cname, 1, _course_website(cname)))
+                if admin_group:
+                    await _post_expiry_card(context, admin_group, "p", user_id,
+                                            row.get('username', ''), cname, end_date)
             elif days <= 0:
                 kicked = await kick_and_deactivate(context, "p", user_id)
                 if kicked:

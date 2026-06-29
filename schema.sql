@@ -96,6 +96,11 @@ DO $$ BEGIN
   ALTER TABLE courses ADD COLUMN assigned_admin TEXT;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+-- Optional course website/renewal link, included in expiry reminder messages.
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN website_url TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS master_groups (
     id          SERIAL PRIMARY KEY,
