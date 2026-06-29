@@ -90,6 +90,12 @@ DO $$ BEGIN
   ALTER TABLE courses ADD COLUMN is_active SMALLINT DEFAULT 1;
 EXCEPTION WHEN duplicate_column THEN NULL;
 END $$;
+-- Course-scoped admin: the panel account (login email) this course is assigned
+-- to. That admin only sees/manages this course; NULL = managed by managers only.
+DO $$ BEGIN
+  ALTER TABLE courses ADD COLUMN assigned_admin TEXT;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
 
 CREATE TABLE IF NOT EXISTS master_groups (
     id          SERIAL PRIMARY KEY,

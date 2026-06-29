@@ -189,7 +189,8 @@ def db_get_all_groups() -> list[dict]:
 #  Courses
 # ─────────────────────────────────────────────
 
-_COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id"]
+_COURSE_COLS = ["id", "course_name", "course_code", "group_link", "group_id", "assigned_admin"]
+_COURSE_SELECT = "id, course_name, course_code, group_link, group_id, assigned_admin"
 
 
 def db_load_courses() -> pd.DataFrame:
@@ -197,7 +198,7 @@ def db_load_courses() -> pd.DataFrame:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, course_name, course_code, group_link, group_id "
+                f"SELECT {_COURSE_SELECT} "
                 "FROM courses WHERE COALESCE(is_active, 1) = 1 ORDER BY id"
             )
             rows = cur.fetchall()
@@ -207,10 +208,13 @@ def db_load_courses() -> pd.DataFrame:
 
 
 def db_save_course(course_name: str, course_code: str = "",
-                   group_link: str = "", group_id: Optional[int] = None):
+                   group_link: str = "", group_id: Optional[int] = None,
+                   assigned_admin: Optional[str] = None):
     """Insert a new course (or update group info if the code already exists).
 
-    Re-adding a previously deactivated course reactivates it.
+    Re-adding a previously deactivated course reactivates it. assigned_admin is
+    only written when provided (None on update keeps the existing assignment, so
+    syncing a course from the paid-user form never wipes it).
     """
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -223,16 +227,23 @@ def db_save_course(course_name: str, course_code: str = "",
             else:
                 existing = None
             if existing:
-                cur.execute(
-                    "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
-                    "is_active=1 WHERE id=%s",
-                    (course_name, group_link, group_id, existing[0]),
-                )
+                if assigned_admin is None:
+                    cur.execute(
+                        "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
+                        "is_active=1 WHERE id=%s",
+                        (course_name, group_link, group_id, existing[0]),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE courses SET course_name=%s, group_link=%s, group_id=%s, "
+                        "is_active=1, assigned_admin=%s WHERE id=%s",
+                        (course_name, group_link, group_id, assigned_admin or None, existing[0]),
+                    )
             else:
                 cur.execute(
-                    "INSERT INTO courses (course_name, course_code, group_link, group_id, is_active) "
-                    "VALUES (%s, %s, %s, %s, 1)",
-                    (course_name, course_code, group_link, group_id),
+                    "INSERT INTO courses (course_name, course_code, group_link, group_id, "
+                    "is_active, assigned_admin) VALUES (%s, %s, %s, %s, 1, %s)",
+                    (course_name, course_code, group_link, group_id, assigned_admin or None),
                 )
 
 
@@ -253,7 +264,7 @@ def db_get_course_by_code(course_code: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, course_name, course_code, group_link, group_id "
+                f"SELECT {_COURSE_SELECT} "
                 "FROM courses WHERE LOWER(course_code)=LOWER(%s) LIMIT 1",
                 (course_code,),
             )
@@ -266,7 +277,7 @@ def db_get_course_by_name(course_name: str) -> Optional[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, course_name, course_code, group_link, group_id "
+                f"SELECT {_COURSE_SELECT} "
                 "FROM courses WHERE LOWER(TRIM(course_name))=LOWER(TRIM(%s)) LIMIT 1",
                 (course_name,),
             )
@@ -279,12 +290,36 @@ def db_get_courses_by_group_id(group_id: int) -> list[dict]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, course_name, course_code, group_link, group_id "
-                "FROM courses WHERE group_id=%s",
+                f"SELECT {_COURSE_SELECT} FROM courses WHERE group_id=%s",
                 (group_id,),
             )
             rows = cur.fetchall()
     return [dict(zip(_COURSE_COLS, r)) for r in rows]
+
+
+def db_get_courses_for_admin(username: str) -> list[dict]:
+    """Active courses assigned to a given admin (login email), case-insensitive."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {_COURSE_SELECT} FROM courses "
+                "WHERE COALESCE(is_active,1)=1 AND LOWER(assigned_admin)=LOWER(%s) ORDER BY id",
+                (username or "",),
+            )
+            rows = cur.fetchall()
+    return [dict(zip(_COURSE_COLS, r)) for r in rows]
+
+
+def db_get_admin_course_names(username: str) -> set:
+    """All course names assigned to this admin (active or not), for scoping."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT course_name FROM courses WHERE LOWER(assigned_admin)=LOWER(%s)",
+                (username or "",),
+            )
+            rows = cur.fetchall()
+    return {r[0] for r in rows if r[0]}
 
 
 def db_get_active_subs_by_userid(user_id: int) -> list[dict]:

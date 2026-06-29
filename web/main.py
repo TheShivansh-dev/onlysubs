@@ -34,6 +34,8 @@ from Handlers.db import (
     db_load_courses,
     db_save_course,
     db_delete_course,
+    db_get_courses_for_admin,
+    db_get_admin_course_names,
     db_get_all_registered_users,
     db_get_user_by_userid,
     db_remove_registered_user,
@@ -185,6 +187,23 @@ def _diff(fields) -> str:
     return "; ".join(parts) if parts else "no change"
 
 
+def _allowed_courses(user: dict):
+    """
+    Course-scoping for a plain admin: returns the set of course names they are
+    assigned to. Returns None for owner/superadmin, meaning no restriction.
+    """
+    if user["role"] == "admin":
+        return db_get_admin_course_names(user["username"])
+    return None
+
+
+def _assert_course_allowed(user: dict, course_name: str):
+    """Block a scoped admin from touching a course outside their assignment."""
+    allowed = _allowed_courses(user)
+    if allowed is not None and (course_name or "") not in allowed:
+        raise HTTPException(403, "This course is not assigned to you")
+
+
 # ── Static files & SPA ───────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -219,6 +238,9 @@ def get_stats(current_user: dict = Depends(_get_current_user)):
 # ── Courses ───────────────────────────────────────────────────────────────────
 @app.get("/api/courses")
 def list_courses(current_user: dict = Depends(_get_current_user)):
+    # A scoped admin only sees the course(s) assigned to them.
+    if current_user["role"] == "admin":
+        return db_get_courses_for_admin(current_user["username"])
     df = db_load_courses()
     return df.to_dict(orient="records")
 
@@ -227,6 +249,7 @@ class CourseBody(BaseModel):
     course_name: str
     group_link: Optional[str] = ""
     group_id: Optional[int] = None
+    assigned_admin: Optional[str] = None   # admin login email this course belongs to
 
 
 @app.post("/api/courses", status_code=201)
@@ -234,13 +257,34 @@ def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)
     name = body.course_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="course_name is required")
-    db_save_course(name, make_course_code(name), (body.group_link or "").strip(), body.group_id)
-    db_add_log(current_user["username"], "course_add", name)
+
+    # Who the course is assigned to:
+    #  - a plain admin can only create courses for themselves;
+    #  - a manager may assign it to any existing admin account (or leave it open).
+    if current_user["role"] == "admin":
+        assigned = current_user["username"]
+    else:
+        assigned = (body.assigned_admin or "").strip() or None
+        if assigned:
+            target = db_get_admin_user(assigned)
+            if not target or target["role"] != "admin":
+                raise HTTPException(400, "Assigned admin must be an existing admin account")
+            assigned = target["username"]   # canonical
+
+    db_save_course(name, make_course_code(name), (body.group_link or "").strip(),
+                   body.group_id, assigned_admin=assigned)
+    db_add_log(current_user["username"], "course_add",
+               f"{name}" + (f" → admin {assigned}" if assigned else ""))
     return {"ok": True, "course_code": make_course_code(name)}
 
 
 @app.delete("/api/courses/{course_id}")
 def delete_course(course_id: int, current_user: dict = Depends(_get_current_user)):
+    # A scoped admin may only deactivate a course assigned to them.
+    if current_user["role"] == "admin":
+        mine = {c["id"] for c in db_get_courses_for_admin(current_user["username"])}
+        if course_id not in mine:
+            raise HTTPException(403, "This course is not assigned to you")
     db_delete_course(course_id)
     db_add_log(current_user["username"], "course_deactivate", f"id={course_id}")
     return {"ok": True}
@@ -251,6 +295,9 @@ def delete_course(course_id: int, current_user: dict = Depends(_get_current_user
 @app.get("/api/users")
 def list_users(current_user: dict = Depends(_get_current_user)):
     users = db_get_all_registered_users()
+    allowed = _allowed_courses(current_user)
+    if allowed is not None:
+        users = [u for u in users if (u.get("plan_type") or "") in allowed]
     # Serialise date objects to strings
     for u in users:
         for k, v in u.items():
@@ -276,6 +323,8 @@ async def _kick_from_group(kind: str, user_id: int) -> bool:
 
 @app.delete("/api/users/{user_id}")
 async def remove_user(user_id: int, current_user: dict = Depends(_get_current_user)):
+    row = db_get_user_by_userid(user_id) or {}
+    _assert_course_allowed(current_user, row.get("plan_type") or "")
     kicked = await _kick_from_group("r", user_id)
     today = str(datetime.utcnow().date())
     db_remove_registered_user(user_id, today)
@@ -296,6 +345,9 @@ def edit_user(user_id: int, body: EditUserBody, current_user: dict = Depends(_ge
     new_name   = (body.username or "").strip()
     new_course = body.plan_type.strip()
     new_end    = body.end_date.strip()
+    # A scoped admin may only touch (and move within) their own course(s).
+    _assert_course_allowed(current_user, before.get("plan_type") or "")
+    _assert_course_allowed(current_user, new_course)
     db_edit_registered_user(user_id, new_name, new_course, new_end)
     diff = _diff([
         ("name",   before.get("username"),  new_name),
@@ -309,6 +361,8 @@ def edit_user(user_id: int, body: EditUserBody, current_user: dict = Depends(_ge
 @app.put("/api/users/{user_id}/activate")
 def activate_user(user_id: int, current_user: dict = Depends(_get_current_user)):
     """Re-activate a removed subscriber whose date is still valid (not expired)."""
+    row = db_get_user_by_userid(user_id) or {}
+    _assert_course_allowed(current_user, row.get("plan_type") or "")
     ok = db_reactivate_registered_user(user_id)
     if not ok:
         raise HTTPException(400, "No re-activatable subscription (expired or not found)")
@@ -321,6 +375,9 @@ def activate_user(user_id: int, current_user: dict = Depends(_get_current_user))
 @app.get("/api/paid-users")
 def list_paid_users(current_user: dict = Depends(_get_current_user)):
     users = db_get_all_paid_users()
+    allowed = _allowed_courses(current_user)
+    if allowed is not None:
+        users = [u for u in users if (u.get("course") or "") in allowed]
     for u in users:
         for k, v in u.items():
             if hasattr(v, "isoformat"):
@@ -344,6 +401,7 @@ def add_paid_user(body: PaidUserBody, current_user: dict = Depends(_get_current_
     course_name = body.course.strip()
     if not course_name:
         raise HTTPException(status_code=400, detail="course is required")
+    _assert_course_allowed(current_user, course_name)
 
     today    = datetime.utcnow().date()
     end_date = today + timedelta(days=30 * body.months)
@@ -366,6 +424,8 @@ def add_paid_user(body: PaidUserBody, current_user: dict = Depends(_get_current_
 
 @app.delete("/api/paid-users/{user_id}")
 def remove_paid_user(user_id: int, current_user: dict = Depends(_get_current_user)):
+    before = db_get_paid_user(user_id) or {}
+    _assert_course_allowed(current_user, before.get("course") or "")
     db_remove_paid_user(user_id)
     db_add_log(current_user["username"], "paid_user_remove", f"userid={user_id}")
     return {"ok": True}
@@ -380,6 +440,8 @@ class EditPaidUserBody(BaseModel):
 @app.put("/api/paid-users/{user_id}")
 def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = Depends(_get_current_user)):
     before = db_get_paid_user(user_id) or {}
+    _assert_course_allowed(current_user, before.get("course") or "")
+    _assert_course_allowed(current_user, body.course.strip())
     db_edit_paid_user(user_id, body.course, body.start_date, body.end_date)
     diff = _diff([
         ("course", before.get("course"),     body.course),
@@ -677,6 +739,16 @@ async def send_reminders(body: ReminderBody, current: dict = Depends(_get_curren
     if not body.message.strip():
         raise HTTPException(400, "Message is required")
 
+    # A scoped admin can only message subscribers in their own course(s).
+    allowed = _allowed_courses(current)
+    target_ids = body.user_ids
+    if allowed is not None:
+        mine = {u["userid"] for u in db_get_all_registered_users()
+                if (u.get("plan_type") or "") in allowed}
+        target_ids = [uid for uid in body.user_ids if uid in mine]
+        if not target_ids:
+            raise HTTPException(403, "None of the selected users are in your course(s)")
+
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
     kb = None
     if (body.link or "").strip():
@@ -684,7 +756,7 @@ async def send_reminders(body: ReminderBody, current: dict = Depends(_get_curren
             (body.button_label or "Open").strip() or "Open", url=body.link.strip())]])
 
     sent = failed = 0
-    for uid in body.user_ids:
+    for uid in target_ids:
         try:
             await _bot_app.bot.send_message(chat_id=uid, text=body.message, reply_markup=kb)
             sent += 1

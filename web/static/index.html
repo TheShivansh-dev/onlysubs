@@ -424,7 +424,7 @@
             <div class="sc-header"><h6><i class="bi bi-book-fill me-2"></i>Courses</h6></div>
             <div class="sc-body p-0">
               <table class="table table-hover mb-0" id="courses-table">
-                <thead><tr><th>#</th><th>Course Name</th><th>Code</th><th>Group Link</th><th></th></tr></thead>
+                <thead><tr><th>#</th><th>Course Name</th><th>Code</th><th>Assigned Admin</th><th>Group Link</th><th></th></tr></thead>
                 <tbody id="courses-tbody"></tbody>
               </table>
             </div>
@@ -445,9 +445,16 @@
                   <input type="number" class="form-control form-control-sm" id="course-groupid-input" placeholder="-1001234567890" />
                   <div class="form-text">Bot must be admin here. Used to make one-time invites &amp; auto-remove.</div>
                 </div>
-                <div class="mb-3">
+                <div class="mb-2">
                   <label class="form-label small fw-semibold">Group Link <span class="text-muted">(optional fallback)</span></label>
                   <input type="text" class="form-control form-control-sm" id="course-grouplink-input" placeholder="https://t.me/+abc123" />
+                </div>
+                <div class="mb-3 manager-only" id="course-admin-wrap" style="display:none">
+                  <label class="form-label small fw-semibold">Assign to Admin <span class="text-muted">(optional)</span></label>
+                  <select class="form-select form-select-sm" id="course-admin-select">
+                    <option value="">— no specific admin —</option>
+                  </select>
+                  <div class="form-text">That admin will only see/manage this course.</div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add Course</button>
               </form>
@@ -1222,19 +1229,34 @@ async function removePaidUser(userId) {
 //  Courses
 // ══════════════════════════════════════════════════════════════
 async function loadCourses() {
+  if (isManager()) populateCourseAdminSelect();
   const res = await apiFetch('/api/courses');
   if (!res) return;
   const courses = await res.json();
   const tbody = document.getElementById('courses-tbody');
-  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
+  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
   tbody.innerHTML = courses.map((c, i) => `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td>${escHtml(c.course_name)}</td>
       <td><code>${escHtml(c.course_code || '–')}</code></td>
-      <td class="small text-truncate" style="max-width:220px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
+      <td class="small">${c.assigned_admin ? escHtml(c.assigned_admin) : '<span class="text-muted">–</span>'}</td>
+      <td class="small text-truncate" style="max-width:200px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
       <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Deactivate</button></td>
     </tr>`).join('');
+}
+
+// Managers can assign a new course to an existing admin account.
+async function populateCourseAdminSelect() {
+  const wrap = document.getElementById('course-admin-wrap');
+  const sel  = document.getElementById('course-admin-select');
+  if (!wrap || !sel) return;
+  wrap.style.display = '';
+  const res = await apiFetch('/api/admins');
+  if (!res || !res.ok) return;
+  const admins = (await res.json()).filter(a => a.role === 'admin');
+  sel.innerHTML = '<option value="">— no specific admin —</option>' +
+    admins.map(a => `<option value="${escHtml(a.username)}">${escHtml(a.username)}</option>`).join('');
 }
 
 // Live course-code preview
@@ -1251,14 +1273,16 @@ document.getElementById('add-course-form').addEventListener('submit', async e =>
   const name = document.getElementById('course-name-input').value.trim();
   if (!name) return;
   const groupId = document.getElementById('course-groupid-input').value;
+  const adminSel = document.getElementById('course-admin-select');
   const body = {
     course_name: name,
     group_link:  document.getElementById('course-grouplink-input').value.trim(),
     group_id:    groupId ? parseInt(groupId) : null,
+    assigned_admin: (isManager() && adminSel) ? (adminSel.value || null) : null,
   };
   const res = await apiFetch('/api/courses', { method: 'POST', body: JSON.stringify(body) });
   if (res && res.ok) { toast('Course added'); e.target.reset(); document.getElementById('course-code-preview').textContent = ''; loadCourses(); }
-  else toast('Failed to add course', 'error');
+  else { const d = res ? await res.json().catch(() => ({})) : {}; toast(d.detail || 'Failed to add course', 'error'); }
 });
 
 async function deleteCourse(id) {
