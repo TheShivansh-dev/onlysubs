@@ -35,15 +35,18 @@ from Handlers.db import (
     db_save_course,
     db_delete_course,
     db_get_all_registered_users,
+    db_get_user_by_userid,
     db_remove_registered_user,
     db_edit_registered_user,
     db_reactivate_registered_user,
     db_get_all_paid_users,
+    db_get_paid_user,
     db_add_paid_user,
     db_remove_paid_user,
     db_edit_paid_user,
     db_get_all_settings,
     db_set_setting,
+    db_get_setting,
     db_get_current_admin_group,
     db_set_admin_group,
     db_remove_admin_group,
@@ -170,6 +173,18 @@ def _require_owner(current: dict = Depends(_get_current_user)) -> dict:
     return current
 
 
+def _diff(fields) -> str:
+    """Build a 'before → after' summary for the audit log from
+    (label, old, new) tuples, listing only the fields that actually changed."""
+    parts = []
+    for label, old, new in fields:
+        old_s = "" if old is None else str(old)
+        new_s = "" if new is None else str(new)
+        if old_s != new_s:
+            parts.append(f"{label}: {old_s or '∅'} → {new_s or '∅'}")
+    return "; ".join(parts) if parts else "no change"
+
+
 # ── Static files & SPA ───────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -277,9 +292,17 @@ class EditUserBody(BaseModel):
 
 @app.put("/api/users/{user_id}")
 def edit_user(user_id: int, body: EditUserBody, current_user: dict = Depends(_get_current_user)):
-    db_edit_registered_user(user_id, (body.username or "").strip(),
-                            body.plan_type.strip(), body.end_date.strip())
-    db_add_log(current_user["username"], "user_edit", f"userid={user_id}")
+    before = db_get_user_by_userid(user_id) or {}
+    new_name   = (body.username or "").strip()
+    new_course = body.plan_type.strip()
+    new_end    = body.end_date.strip()
+    db_edit_registered_user(user_id, new_name, new_course, new_end)
+    diff = _diff([
+        ("name",   before.get("username"),  new_name),
+        ("course", before.get("plan_type"), new_course),
+        ("ends",   before.get("end_date"),  new_end),
+    ])
+    db_add_log(current_user["username"], "user_edit", f"userid={user_id} — {diff}")
     return {"ok": True}
 
 
@@ -356,8 +379,14 @@ class EditPaidUserBody(BaseModel):
 
 @app.put("/api/paid-users/{user_id}")
 def edit_paid_user(user_id: int, body: EditPaidUserBody, current_user: dict = Depends(_get_current_user)):
+    before = db_get_paid_user(user_id) or {}
     db_edit_paid_user(user_id, body.course, body.start_date, body.end_date)
-    db_add_log(current_user["username"], "paid_user_edit", f"userid={user_id}")
+    diff = _diff([
+        ("course", before.get("course"),     body.course),
+        ("start",  before.get("start_date"), body.start_date),
+        ("ends",   before.get("end_date"),   body.end_date),
+    ])
+    db_add_log(current_user["username"], "paid_user_edit", f"userid={user_id} — {diff}")
     return {"ok": True}
 
 
@@ -492,12 +521,12 @@ def edit_account(username: str, body: EditAccountBody,
         if sa["role"] != "owner":
             raise HTTPException(403, "Only the owner can change roles")
         db_set_admin_role(username, body.role)
-        changes.append(f"role={body.role}")
+        changes.append(f"role: {target['role']} → {body.role}")
     if body.new_password:
         if len(body.new_password) < 6:
             raise HTTPException(400, "Password must be at least 6 characters")
         db_change_admin_password(username, hash_password(body.new_password))
-        changes.append("password")
+        changes.append("password changed")
     final_name = username
     if body.email and body.email.strip() and body.email.strip() != username:
         new_email = body.email.strip()
@@ -507,9 +536,9 @@ def edit_account(username: str, body: EditAccountBody,
         if not ok:
             raise HTTPException(400, "That email is already in use")
         final_name = new_email
-        changes.append(f"email={new_email}")
+        changes.append(f"email: {username} → {new_email}")
 
-    db_add_log(sa["username"], "account_edit", f"{username} -> {', '.join(changes) or 'no change'}")
+    db_add_log(sa["username"], "account_edit", f"{username} — {'; '.join(changes) or 'no change'}")
     return {"ok": True, "username": final_name}
 
 
@@ -621,8 +650,10 @@ class SettingBody(BaseModel):
 def update_setting(key: str, body: SettingBody, sa: dict = Depends(_require_manager)):
     if key in _HIDDEN_SETTINGS:
         raise HTTPException(403, "This setting cannot be changed from the panel")
-    db_set_setting(key, body.value.strip())
-    db_add_log(sa["username"], "setting_update", f"{key}={body.value.strip()}")
+    old = db_get_setting(key, "")
+    new = body.value.strip()
+    db_set_setting(key, new)
+    db_add_log(sa["username"], "setting_update", f"{key} — {_diff([('value', old, new)])}")
     return {"ok": True}
 
 

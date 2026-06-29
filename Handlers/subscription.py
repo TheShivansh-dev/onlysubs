@@ -637,10 +637,13 @@ async def _notify_removal_failed(context: ContextTypes.DEFAULT_TYPE,
         log(f"[EXPIRY] could not post removal-failure note for {user_id}: {e}")
 
 
+_LOG_RETENTION_DAYS = 10
+
+
 async def _maybe_clear_logs():
     """
-    Wipe the audit log every 2nd day, tied to the daily expiry run. Tracks the
-    last clear date in bot_settings so it fires at most once per 2 days.
+    Wipe the audit log every 10 days, tied to the daily expiry run. Tracks the
+    last clear date in bot_settings so it fires at most once per 10 days.
     """
     try:
         today = datetime.now().date()
@@ -651,10 +654,10 @@ async def _maybe_clear_logs():
                 last = datetime.strptime(last_raw, "%Y-%m-%d").date()
             except ValueError:
                 last = None
-        if last is None or (today - last).days >= 2:
+        if last is None or (today - last).days >= _LOG_RETENTION_DAYS:
             n = db_clear_logs()
             db_set_setting("LAST_LOG_CLEAR", str(today))
-            log(f"[LOGS] cleared {n} audit log rows (every-2nd-day housekeeping)")
+            log(f"[LOGS] cleared {n} audit log rows (every-{_LOG_RETENTION_DAYS}-day housekeeping)")
     except Exception as e:
         log(f"[LOGS] auto-clear failed: {e}")
 
