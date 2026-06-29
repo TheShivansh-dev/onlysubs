@@ -182,12 +182,14 @@ def set_pending_link(unique_id: str, link: str):
 #  DISPLAY MESSAGE
 # ─────────────────────────────────────────────
 
-def get_display_message(course_name: str, months: int, end_date) -> str:
+def get_display_message(course_name: str, months: int, end_date, start_date=None) -> str:
     """Welcome message sent to the user after a successful subscription."""
+    join_line = f"🗓️ <b>Joining Date:</b> {start_date}\n" if start_date else ""
     return (
         f"🎉 <b>Welcome to {course_name}!</b>\n\n"
         f"📅 <b>Duration:</b> {months} Month{'s' if months > 1 else ''}\n"
-        f"⏰ <b>Access Until:</b> {end_date}\n\n"
+        f"{join_line}"
+        f"⏰ <b>Ending Date:</b> {end_date}\n\n"
         f"🎯 Tap below to join the group.\n\n"
         f"❓ Need help? Contact {get_support_contact()}"
     )

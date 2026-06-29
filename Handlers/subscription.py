@@ -121,9 +121,9 @@ async def _is_group_member(context: ContextTypes.DEFAULT_TYPE,
 
 
 async def _send_join_link(update: Update, course: dict, months: int,
-                          end_date, invite: str | None):
+                          end_date, invite: str | None, start_date=None):
     """Send a one-tap group join link + support contact (direct join)."""
-    msg = get_display_message(course['course_name'], months, end_date)
+    msg = get_display_message(course['course_name'], months, end_date, start_date)
     if invite:
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("Join Group", url=invite)]])
         await update.message.reply_text(
@@ -338,7 +338,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             invite = await _make_rejoin_invite(context, course, user_id)
-            await _send_join_link(update, course, months, end_date, invite)
+            start = row.get('registration_date') if row else None
+            await _send_join_link(update, course, months, end_date, invite, start)
         else:
             # Someone else already joined on this UniqueId → block.
             await update.message.reply_text(
@@ -353,7 +354,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #    the UniqueId bound only when the user actually joins (chat_member). ──
     invite = await _make_claim_invite(context, course, unique_id, months)
     log(f"[CLAIM] issued claim link uid={unique_id} -> {course['course_name']} ({months}m)")
-    await _send_join_link(update, course, months, _today_plus(months), invite)
+    await _send_join_link(update, course, months, _today_plus(months), invite,
+                          datetime.now().date())
 
 
 def _today_plus(months: int):
