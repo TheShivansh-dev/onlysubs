@@ -456,8 +456,14 @@
                 </div>
                 <div class="mb-3 manager-only" id="course-admin-wrap" style="display:none">
                   <label class="form-label small fw-semibold">Assign to Admins <span class="text-muted">(optional, pick one or more)</span></label>
-                  <select class="form-select form-select-sm" id="course-admin-select" multiple size="4"></select>
-                  <div class="form-text">Hold Ctrl/⌘ to select multiple. Selected admins see/manage only this course.</div>
+                  <div class="dropdown">
+                    <button class="form-select form-select-sm text-start" type="button" id="course-admin-toggle"
+                            data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                      Select admins
+                    </button>
+                    <ul class="dropdown-menu w-100 p-1" id="course-admin-list" style="max-height:220px; overflow-y:auto;"></ul>
+                  </div>
+                  <div class="form-text">Click to open, tick one or more admins.</div>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm w-100 fw-semibold">Add Course</button>
               </form>
@@ -1249,18 +1255,36 @@ async function loadCourses() {
     </tr>`).join('');
 }
 
-// Managers can assign a new course to an existing admin account.
+// Managers can assign a new course to one or more existing admin accounts.
 async function populateCourseAdminSelect() {
   const wrap = document.getElementById('course-admin-wrap');
-  const sel  = document.getElementById('course-admin-select');
-  if (!wrap || !sel) return;
+  const list = document.getElementById('course-admin-list');
+  if (!wrap || !list) return;
   wrap.style.display = '';
   const res = await apiFetch('/api/admins');
   if (!res || !res.ok) return;
   const admins = (await res.json()).filter(a => a.role === 'admin');
-  sel.innerHTML = admins.length
-    ? admins.map(a => `<option value="${escHtml(a.username)}">${escHtml(a.username)}</option>`).join('')
-    : '<option value="" disabled>No admin accounts yet</option>';
+  list.innerHTML = admins.length
+    ? admins.map(a => `
+      <li>
+        <label class="dropdown-item d-flex align-items-center gap-2 small" style="cursor:pointer">
+          <input class="form-check-input m-0 course-admin-cb" type="checkbox" value="${escHtml(a.username)}">
+          <span>${escHtml(a.username)}</span>
+        </label>
+      </li>`).join('')
+    : '<li class="text-muted small px-2 py-1">No admin accounts yet</li>';
+  list.querySelectorAll('.course-admin-cb').forEach(cb =>
+    cb.addEventListener('change', updateCourseAdminLabel));
+  updateCourseAdminLabel();
+}
+
+function updateCourseAdminLabel() {
+  const btn = document.getElementById('course-admin-toggle');
+  if (!btn) return;
+  const sel = [...document.querySelectorAll('.course-admin-cb:checked')].map(cb => cb.value);
+  btn.textContent = sel.length
+    ? (sel.length <= 2 ? sel.join(', ') : `${sel.length} admins selected`)
+    : 'Select admins';
 }
 
 // Live course-code preview
@@ -1277,9 +1301,8 @@ document.getElementById('add-course-form').addEventListener('submit', async e =>
   const name = document.getElementById('course-name-input').value.trim();
   if (!name) return;
   const groupId = document.getElementById('course-groupid-input').value;
-  const adminSel = document.getElementById('course-admin-select');
-  const assignedAdmins = (isManager() && adminSel)
-    ? [...adminSel.selectedOptions].map(o => o.value).filter(Boolean)
+  const assignedAdmins = isManager()
+    ? [...document.querySelectorAll('.course-admin-cb:checked')].map(cb => cb.value)
     : [];
   const body = {
     course_name: name,
