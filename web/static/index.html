@@ -815,6 +815,54 @@
   </div>
 </div>
 
+<!-- Edit Course modal -->
+<div class="modal fade" id="editCourseModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="edit-course-form">
+        <div class="modal-header">
+          <h6 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Edit Course</h6>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="ec-id" />
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label small">Course Name <span class="text-muted">(can't be changed)</span></label>
+              <input type="text" class="form-control form-control-sm" id="ec-name" disabled />
+              <div class="form-text" id="ec-code-preview"></div>
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Group ID</label>
+              <input type="number" class="form-control form-control-sm" id="ec-groupid" placeholder="-1001234567890" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Group Link <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="ec-grouplink" placeholder="https://t.me/+abc123" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small">Course Website Link <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="ec-website" placeholder="https://yourcourse.com/renew" />
+            </div>
+            <div class="col-12 manager-only" id="ec-admin-wrap" style="display:none">
+              <label class="form-label small">Assigned Admins <span class="text-muted">(pick one or more)</span></label>
+              <div class="dropdown">
+                <button class="form-select form-select-sm text-start" type="button" id="ec-admin-toggle"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">Select admins</button>
+                <ul class="dropdown-menu w-100 p-1" id="ec-admin-list" style="max-height:200px; overflow-y:auto;"></ul>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-light btn-sm" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm">Save changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Toast container -->
 <div id="toast-container"></div>
 
@@ -1255,23 +1303,98 @@ async function removePaidUser(userId) {
 // ══════════════════════════════════════════════════════════════
 //  Courses
 // ══════════════════════════════════════════════════════════════
+let _allCourses = [];
+
 async function loadCourses() {
   if (isManager()) populateCourseAdminSelect();
   const res = await apiFetch('/api/courses');
   if (!res) return;
-  const courses = await res.json();
+  _allCourses = await res.json();
   const tbody = document.getElementById('courses-tbody');
-  if (!courses.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
-  tbody.innerHTML = courses.map((c, i) => `
+  if (!_allCourses.length) { tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No courses yet</td></tr>'; return; }
+  tbody.innerHTML = _allCourses.map((c, i) => `
     <tr>
       <td class="text-muted">${i + 1}</td>
       <td>${escHtml(c.course_name)}</td>
       <td><code>${escHtml(c.course_code || '–')}</code></td>
       <td class="small">${c.assigned_admin ? escHtml(c.assigned_admin.split(',').map(s => s.trim()).join(', ')) : '<span class="text-muted">–</span>'}</td>
       <td class="small text-truncate" style="max-width:200px">${c.group_link ? escHtml(c.group_link) : '<span class="text-muted">–</span>'}</td>
-      <td><button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Deactivate</button></td>
+      <td class="text-nowrap">
+        <button class="btn btn-outline-primary btn-sm py-0 px-2 me-1" onclick="openEditCourse(${c.id})">Edit</button>
+        <button class="btn btn-danger btn-sm py-0 px-2" onclick="deleteCourse(${c.id})">Deactivate</button>
+      </td>
     </tr>`).join('');
 }
+
+// Open the edit modal pre-filled with a course's current values.
+async function openEditCourse(id) {
+  const c = _allCourses.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('ec-id').value        = c.id;
+  document.getElementById('ec-name').value       = c.course_name || '';
+  document.getElementById('ec-groupid').value    = (c.group_id != null) ? c.group_id : '';
+  document.getElementById('ec-grouplink').value  = c.group_link || '';
+  document.getElementById('ec-website').value     = c.website_url || '';
+  document.getElementById('ec-code-preview').textContent = `Code: ${_courseCode(c.course_name)}`;
+  if (isManager()) {
+    const assigned = (c.assigned_admin || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    await _fillAdminChecklist('ec-admin-list', 'ec-admin-toggle', assigned);
+    document.getElementById('ec-admin-wrap').style.display = '';
+  } else {
+    document.getElementById('ec-admin-wrap').style.display = 'none';
+  }
+  bootstrap.Modal.getOrCreateInstance(document.getElementById('editCourseModal')).show();
+}
+
+// Shared: render an admin checkbox dropdown, pre-checking the given usernames.
+async function _fillAdminChecklist(listId, toggleId, preChecked) {
+  const list = document.getElementById(listId);
+  if (!list) return;
+  const res = await apiFetch('/api/admins');
+  const admins = (res && res.ok) ? (await res.json()).filter(a => a.role === 'admin') : [];
+  const pre = new Set((preChecked || []).map(s => s.toLowerCase()));
+  list.innerHTML = admins.length
+    ? admins.map(a => `
+      <li>
+        <label class="dropdown-item d-flex align-items-center gap-2 small" style="cursor:pointer">
+          <input class="form-check-input m-0 ${listId}-cb" type="checkbox" value="${escHtml(a.username)}" ${pre.has(a.username.toLowerCase()) ? 'checked' : ''}>
+          <span>${escHtml(a.username)}</span>
+        </label>
+      </li>`).join('')
+    : '<li class="text-muted small px-2 py-1">No admin accounts yet</li>';
+  const updateLabel = () => {
+    const sel = [...list.querySelectorAll(`.${listId}-cb:checked`)].map(cb => cb.value);
+    document.getElementById(toggleId).textContent =
+      sel.length ? (sel.length <= 2 ? sel.join(', ') : `${sel.length} admins selected`) : 'Select admins';
+  };
+  list.querySelectorAll(`.${listId}-cb`).forEach(cb => cb.addEventListener('change', updateLabel));
+  updateLabel();
+}
+
+document.getElementById('edit-course-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const id = document.getElementById('ec-id').value;
+  const groupId = document.getElementById('ec-groupid').value;
+  const assignedAdmins = isManager()
+    ? [...document.querySelectorAll('.ec-admin-list-cb:checked')].map(cb => cb.value)
+    : undefined;
+  const body = {
+    course_name: document.getElementById('ec-name').value.trim(),
+    group_link:  document.getElementById('ec-grouplink').value.trim(),
+    group_id:    groupId ? parseInt(groupId) : null,
+    website_url: document.getElementById('ec-website').value.trim(),
+    assigned_admins: assignedAdmins,
+  };
+  const res = await apiFetch(`/api/courses/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  if (res && res.ok) {
+    toast('Course updated');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editCourseModal')).hide();
+    loadCourses();
+  } else {
+    const d = res ? await res.json().catch(() => ({})) : {};
+    toast(d.detail || 'Failed to update course', 'error');
+  }
+});
 
 // Managers can assign a new course to one or more existing admin accounts.
 async function populateCourseAdminSelect() {

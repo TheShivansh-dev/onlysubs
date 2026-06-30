@@ -34,6 +34,7 @@ from Handlers.db import (
     db_get_stats_for_courses,
     db_load_courses,
     db_save_course,
+    db_update_course,
     db_delete_course,
     db_get_courses_for_admin,
     db_get_admin_course_names,
@@ -288,6 +289,38 @@ def add_course(body: CourseBody, current_user: dict = Depends(_get_current_user)
     db_add_log(current_user["username"], "course_add",
                f"{name}" + (f" → admins: {assigned}" if assigned else ""))
     return {"ok": True, "course_code": make_course_code(name)}
+
+
+@app.put("/api/courses/{course_id}")
+def update_course(course_id: int, body: CourseBody, current_user: dict = Depends(_get_current_user)):
+    # Name and code are NOT editable here — only the group, website and admins.
+    if current_user["role"] == "admin":
+        # Scoped admin: may edit only their own course; cannot change assignees.
+        mine = {c["id"] for c in db_get_courses_for_admin(current_user["username"])}
+        if course_id not in mine:
+            raise HTTPException(403, "This course is not assigned to you")
+        assigned = None   # keep existing assignment
+    else:
+        # Manager: sets the full assignee list (empty list clears all admins).
+        assigned_list = []
+        for a in (body.assigned_admins or []):
+            a = (a or "").strip()
+            if not a:
+                continue
+            target = db_get_admin_user(a)
+            if not target or target["role"] != "admin":
+                raise HTTPException(400, f"'{a}' is not an existing admin account")
+            if target["username"] not in assigned_list:
+                assigned_list.append(target["username"])
+        assigned = ",".join(assigned_list)   # "" clears, never None for a manager
+
+    ok = db_update_course(course_id, (body.group_link or "").strip(), body.group_id,
+                          website_url=(body.website_url or "").strip(),
+                          assigned_admin=assigned)
+    if not ok:
+        raise HTTPException(404, "Course not found")
+    db_add_log(current_user["username"], "course_edit", f"id={course_id}")
+    return {"ok": True}
 
 
 @app.delete("/api/courses/{course_id}")

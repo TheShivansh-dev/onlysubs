@@ -247,6 +247,31 @@ def db_save_course(course_name: str, course_code: str = "",
                 )
 
 
+def db_update_course(course_id: int, group_link: str, group_id: Optional[int],
+                     website_url: Optional[str] = None,
+                     assigned_admin: Optional[str] = None) -> bool:
+    """
+    Edit an existing course's editable fields. The course name and code are
+    intentionally NOT changed here (renaming would change the code and break
+    existing deep links / subscriber matching). website_url / assigned_admin are
+    written only when provided (None = keep). Returns False if id doesn't exist.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM courses WHERE id=%s", (course_id,))
+            if not cur.fetchone():
+                return False
+            sets = ["group_link=%s", "group_id=%s"]
+            vals = [group_link, group_id]
+            if website_url is not None:
+                sets.append("website_url=%s"); vals.append(website_url or None)
+            if assigned_admin is not None:
+                sets.append("assigned_admin=%s"); vals.append(assigned_admin or None)
+            vals.append(course_id)
+            cur.execute(f"UPDATE courses SET {', '.join(sets)} WHERE id=%s", vals)
+    return True
+
+
 def db_delete_course(course_id: int):
     """
     Soft-delete a course: mark it inactive instead of removing the row, so any
