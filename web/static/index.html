@@ -209,17 +209,35 @@
       .sidebar.open { transform: translateX(0); box-shadow: 0 0 24px rgba(0,0,0,.4); }
       .sidebar-backdrop.show { display: block; z-index: 1040; }
       .topbar { left: 0; padding: 0 1rem; }
+      .topbar h5 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .main-content { margin-left: 0; padding: 1rem; }
       .menu-toggle { display: inline-flex; align-items: center; }
 
       /* Cards / headers stack and breathe */
       .section-card .sc-header { flex-wrap: wrap; gap: .5rem; }
-      .search-box { max-width: 100%; }
+      .section-card .sc-body { padding: 1rem; }
       .login-card { width: 92vw; padding: 1.75rem; }
       #toast-container { left: 1rem; right: 1rem; bottom: 1rem; }
 
-      /* Wide tables scroll horizontally instead of breaking the layout */
+      /* Filters / search in card headers go full width and stack */
+      .sc-header > .d-flex { width: 100%; }
+      .sc-header .form-select,
+      .sc-header .form-control,
+      .search-box,
+      .sc-header [style*="max-width"] { max-width: 100% !important; width: 100%; }
+
+      /* Compact stat cards */
+      .stat-card { padding: 1rem 1.1rem; }
+      .stat-card .value { font-size: 1.45rem; }
+      .stat-card .icon { width: 42px; height: 42px; font-size: 1.2rem; }
+
+      /* Roomier modals on small screens */
+      .modal-dialog { margin: .5rem; }
+
+      /* Wide tables scroll horizontally instead of breaking the layout.
+         Tables already inside .table-responsive let that wrapper scroll. */
       table.table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+      .table-responsive > table.table { display: table; white-space: nowrap; }
     }
   </style>
 </head>
