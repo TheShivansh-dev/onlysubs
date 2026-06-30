@@ -31,7 +31,7 @@ def _is_admin(update: Update) -> bool:
 
 def _save_days_keyboard(kind: str, user_id: int) -> InlineKeyboardMarkup:
     """Day-count chooser shown after the admin taps Save."""
-    days = [5, 10, 15, 20, 30]
+    days = [2, 5, 10]
     row = [InlineKeyboardButton(f"{d}d", callback_data=f"exp_days_{kind}_{user_id}_{d}") for d in days]
     return InlineKeyboardMarkup([row,
         [InlineKeyboardButton("❌ Remove now", callback_data=f"exp_rem_{kind}_{user_id}")]])
