@@ -41,6 +41,7 @@ from Handlers.db import (
     db_get_all_registered_users,
     db_get_user_by_userid,
     db_remove_registered_user,
+    db_delete_registered_user_hard,
     db_edit_registered_user,
     db_reactivate_registered_user,
     db_get_all_paid_users,
@@ -376,6 +377,18 @@ async def remove_user(user_id: int, current_user: dict = Depends(_get_current_us
     db_add_log(current_user["username"], "user_remove",
                f"userid={user_id} kicked={kicked}")
     return {"ok": True, "kicked": kicked}
+
+
+@app.delete("/api/users/{user_id}/hard")
+async def delete_user_hard(user_id: int, current_user: dict = Depends(_get_current_user)):
+    """Permanently delete a subscriber (kick from group + wipe the DB record)."""
+    row = db_get_user_by_userid(user_id) or {}
+    _assert_course_allowed(current_user, row.get("plan_type") or "")
+    kicked = await _kick_from_group("r", user_id)
+    deleted = db_delete_registered_user_hard(user_id)
+    db_add_log(current_user["username"], "user_delete",
+               f"userid={user_id} kicked={kicked} rows={deleted}")
+    return {"ok": True, "kicked": kicked, "deleted": deleted}
 
 
 class EditUserBody(BaseModel):

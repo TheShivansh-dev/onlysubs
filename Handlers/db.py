@@ -608,6 +608,24 @@ def db_remove_registered_user(user_id: int, removed_date: str):
             )
 
 
+def db_delete_registered_user_hard(user_id: int) -> int:
+    """
+    Permanently delete a subscriber's registered_users rows AND release their
+    UniqueId claim (so a fresh link can be issued later). Returns rows deleted.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM registered_users WHERE userid=%s", (user_id,))
+            deleted = cur.rowcount
+            # Free any UniqueId(s) this user had claimed.
+            cur.execute(
+                "UPDATE guids SET claimed_userid=NULL, claimed_date=NULL, "
+                "is_used=0, pending_link=NULL WHERE claimed_userid=%s",
+                (user_id,),
+            )
+    return deleted
+
+
 def db_reactivate_registered_user(user_id: int) -> bool:
     """
     Bring a removed-but-still-valid subscriber back to active (isremoved=0).
